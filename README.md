@@ -54,10 +54,12 @@ TOPTW-HybridGA/
 │   │   └── main.dart
 │   └── pubspec.yaml
 └── README.md
+```
 
 ## 📝 License
 
 Distributed under the MIT License. See LICENSE for more information.
 
 **Author:** Hoàng Minh Đức
-Faculty of Information Technology - VNU UET
+
+**Faculty of Information Technology - VNU UET**
