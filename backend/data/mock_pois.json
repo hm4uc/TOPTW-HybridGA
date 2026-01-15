@@ -1,0 +1,7 @@
+[
+  {"id": 1, "name": "Ho Guom", "lat": 21.0285, "lon": 105.8542, "score": 10, "open_time": 8.0, "close_time": 22.0, "price": 0, "category": "nature"},
+  {"id": 2, "name": "Lang Bac", "lat": 21.0368, "lon": 105.8347, "score": 20, "open_time": 7.5, "close_time": 11.0, "price": 0, "category": "history"},
+  {"id": 3, "name": "Van Mieu", "lat": 21.0293, "lon": 105.8360, "score": 15, "open_time": 8.0, "close_time": 17.0, "price": 30000, "category": "culture"},
+  {"id": 4, "name": "Ho Tay", "lat": 21.0587, "lon": 105.8038, "score": 12, "open_time": 0.0, "close_time": 24.0, "price": 50000, "category": "entertainment"},
+  {"id": 5, "name": "Nha Tu Hoa Lo", "lat": 21.0253, "lon": 105.8465, "score": 18, "open_time": 8.0, "close_time": 17.0, "price": 30000, "category": "history"}
+]
