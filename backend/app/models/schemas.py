@@ -1,13 +1,16 @@
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 
+
 # Input from user
 class UserPreferences(BaseModel):
     budget: float = Field(..., description="Ngân sách tối đa cho chuyến đi")
     start_time: float = Field(8.0, description="Thời gian bắt đầu chuyến đi (giờ)")
     end_time: float = Field(17.0, description="Thời gian kết thúc chuyến đi (giờ)")
     start_node_id: int = Field(..., description="ID điểm xuất phát (depot)")
-    interests: Dict[str, float] = Field(..., description="Sở thích và trọng số tương ứng")
+    interests: Dict[str, float] = Field(..., description="Sở thích và trọng số tương ứng. "
+                                                         "Key phải thuộc: history_culture, "
+                                                         "nature_parks, food_drink, shopping, entertainment")
 
 # Output
 class ItineraryItem(BaseModel):
@@ -21,6 +24,7 @@ class ItineraryItem(BaseModel):
     leave: Optional[str] = Field(None, description="Thời gian rời đi (HH:MM)")
     cost: float = Field(..., description="Chi phí tham quan")
     score: float = Field(..., description="Điểm đạt được tại điểm tham quan")
+
 class OptimizationResponse(BaseModel):
     total_score: float = Field(..., description="Tổng điểm đạt được")
     total_cost: float = Field(..., description="Tổng chi phí")

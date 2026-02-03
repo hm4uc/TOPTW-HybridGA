@@ -1,39 +1,56 @@
 import os
+import csv
+import random
 from app.models.domain import POI
 
-# Danh sách category giả lập
-CATEGORIES = ['history', 'culture', 'nature', 'food', 'shopping']
+# --- DANH SÁCH CATEGORY CHUẨN ---
+# Dùng bộ này cho toàn bộ hệ thống
+CATEGORIES = [
+    'history_culture', # Lăng Bác, Văn Miếu, Hoàng Thành, Chùa Một Cột, ...
+    'nature_parks', # Công viên Thống Nhất, Hồ Gươm, Vườn hoa Lý Thái Tổ, ...
+    'food_drink', # Phở Thìn, Bún Chả Hương Liên, Cà phê Giảng, ...
+    'shopping', # Chợ Đồng Xuân, Vincom Bà Triệu, Tràng Tiền Plaza, ...
+    'entertainment' # Rạp chiếu phim Quốc gia, Nhà hát Lớn Hà Nội, Cung Văn hóa Hữu nghị Việt Xô, ...
+]
 
-def load_solomon_c101():
-    base_path = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
-    file_path = os.path.join(base_path, 'data', 'solomon_instances', 'C101.csv')
+# Tỷ lệ xuất hiện giả lập (Mô phỏng đặc thù du lịch Hà Nội)
+# history_culture: 35%, food: 25%, nature: 15%, shopping: 15%, entertainment: 10%
+CATEGORY_WEIGHTS = [0.35, 0.15, 0.25, 0.15, 0.10]
+
+def load_solomon_data():
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    file_path = os.path.join(os.getcwd(), 'data', 'C101.csv')
 
     pois = []
-
     try:
-        with open(file_path) as csvfile:
-            lines = csvfile.readlines()[1:]  # Bỏ qua header
-            for line in lines:
-                parts = line.strip().split(',')
-                if len(parts) < 9:
-                    continue
+        with open(file_path, 'r', encoding='utf-8') as f: # Thêm encoding utf-8 cho chắc
+            reader = csv.DictReader(f)
+            for row in reader:
+                pid = int(row.get('CUST NO.', 0))
 
-                id = int(parts[0])
-                lat = float(parts[1])
-                lon = float(parts[2])
-                score = float(parts[3])
-                open_time = float(parts[4])
-                close_time = float(parts[5])
-                price = float(parts[6])
-                duration = int(parts[7])
+                # --- LOGIC GÁN TAG ---
+                # 1. Điểm 0 luôn là Depot (Khách sạn)
+                if pid == 0:
+                    cat = "depot"
+                else:
+                    # 2. Các điểm khác gán theo tỷ lệ weights đã định nghĩa
+                    # Dùng seed theo PID để đảm bảo Node 1 luôn là 'history_culture' mỗi lần chạy lại
+                    random.seed(pid)
+                    cat = random.choices(CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
 
-                # Gán category ngẫu nhiên từ danh sách giả lập
-                category = CATEGORIES[id % len(CATEGORIES)]
-
-                poi = POI(id, lat, lon, score, open_time, close_time, price, duration, category)
+                poi = POI(
+                    id=pid,
+                    x=float(row.get('XCOORD.', 0)),
+                    y=float(row.get('YCOORD.', 0)),
+                    score=float(row.get('DEMAND', 0)),
+                    open_time=float(row.get('READY TIME', 0)),
+                    close_time=float(row.get('DUE DATE', 0)),
+                    duration=float(row.get('SERVICE TIME', 0)),
+                    category=cat
+                )
                 pois.append(poi)
     except Exception as e:
-        print(f"Error loading Solomon C101 data: {e}")
+        print(f"Lỗi đọc file data: {e}")
         return []
 
     return pois
