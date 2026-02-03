@@ -1,6 +1,13 @@
 from pydantic import BaseModel
 from typing import List, Dict
 
+# Số sao (User chọn),Ý nghĩa ,      Trọng số W,     Tác động lên điểm POI
+# ⭐,        Ghét / Không quan tâm,   0.1,       Điểm số bị chia 10 (Gần như không bao giờ được chọn vào lịch trình)
+# ⭐⭐,      Ít quan tâm,             0.5,       Điểm số bị giảm một nửa
+# ⭐⭐⭐,    Bình thường,             1.0,       Giữ nguyên điểm gốc (Base Score)
+# ⭐⭐⭐⭐,  Thích,                   1.5,       Điểm số được cộng thêm 50%
+# ⭐⭐⭐⭐⭐,Rất thích (Ưu tiên),     2.0,       Điểm số nhân đôi (Rất dễ được chọn)
+
 # Input từ Mobile gửi lên
 class UserPreferences(BaseModel):
     budget: float

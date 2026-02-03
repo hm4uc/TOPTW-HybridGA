@@ -13,3 +13,5 @@ def load_pois():
     for item in data:
         pois.append(POI(**item))
     return pois
+
+# Cột DEMAND trong Solomon là cột score trong bài toán này

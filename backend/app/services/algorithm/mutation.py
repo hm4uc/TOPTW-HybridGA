@@ -1,4 +1,7 @@
-# Kỹ thuật Hybrid Local Search (2-opt).
+# Kỹ thuật Hybrid Local Search
+#! Viết đủ 3 hàm: mutation_insert (rút 1 điểm ra và chèn vào chỗ khác), mutation_swap (đổi vị trí 2 điểm bất kỳ),
+#! mutation_inverse (đảo ngược 1 đoạn con, chính là 2-opt).
+#? Khi chạy thuật toán, random chọn 1 trong 3 cách này để tạo sự đa dạng.
 
 from .fitness import calculate_fitness
 import copy
@@ -10,7 +13,7 @@ def apply_smart_mutation(ind, user_prefs):
     # Thử đảo ngược các đoạn con (2-opt)
     # Bỏ qua điểm đầu (Depot) nếu cần cố định
     n = len(ind.route)
-    if n < 4: return ind # Quá ngắn không cần đảo
+    if n < 4: return ind  # Quá ngắn không cần đảo
 
     for i in range(1, n - 2):
         for j in range(i + 1, n):
@@ -28,7 +31,7 @@ def apply_smart_mutation(ind, user_prefs):
                 ind.route = new_route
                 ind.fitness = new_fit
                 improved = True
-                break # First improvement
+                break  # First improvement
         if improved: break
 
     return ind
