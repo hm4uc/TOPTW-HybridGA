@@ -1,4 +1,3 @@
-# Kỹ thuật Hybrid Local Search
 #! Viết đủ 3 hàm: mutation_insert (rút 1 điểm ra và chèn vào chỗ khác), mutation_swap (đổi vị trí 2 điểm bất kỳ),
 #! mutation_inverse (đảo ngược 1 đoạn con, chính là 2-opt).
 #? Khi chạy thuật toán, random chọn 1 trong 3 cách này để tạo sự đa dạng.

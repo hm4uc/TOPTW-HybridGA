@@ -1,20 +1,11 @@
 class POI:
-    def __init__(self, id, name, lat, lon, score, open_time, close_time, price, category):
+    def __init__(self, id, lat, lon, score, open_time, close_time, price, duration, category):
         self.id = id
-        self.name = name
         self.lat = lat
         self.lon = lon
-        self.base_score = score
-        self.open_time = open_time
-        self.close_time = close_time
-        self.price = price
-        self.category = category
-
-class Individual:
-    def __init__(self, route):
-        self.route = route # List[POI]
-        self.fitness = 0.0
-        self.total_score = 0.0
-        self.total_cost = 0.0
-        self.total_time = 0.0
-        self.penalty = 0.0
+        self.base_score = score  # DEMAND tương ứng trong Solomon
+        self.open_time = open_time  # Giờ mở cửa (giờ thập phân)
+        self.close_time = close_time  # Giờ đóng cửa (giờ thập phân)
+        self.price = price  # Chi phí tham quan
+        self.duration = duration # Thời gian tham quan (phút)
+        self.category = category  # Loại điểm (culture, food, nature, shopping, ...)

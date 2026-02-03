@@ -1,5 +1,3 @@
-# Hàm tính điểm thích nghi (Logic cốt lõi).
-
 import math
 
 # Hàm phụ trợ: Tính khoảng cách Haversine (km) -> quy ra phút
