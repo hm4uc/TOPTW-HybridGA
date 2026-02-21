@@ -1,62 +1,147 @@
 import math
+from app.models.domain import POI
+from app.models.schemas import UserPreferences
 
-# Hàm phụ trợ: Tính khoảng cách Haversine (km) -> quy ra phút
-def get_travel_time(p1, p2):
-    R = 6371  # Bán kính trái đất (km)
-    dlat = math.radians(p2.lat - p1.lat)
-    dlon = math.radians(p2.lon - p1.lon)
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(p1.lat)) * math.cos(math.radians(p2.lat)) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    dist_km = R * c
-    speed_kmh = 20 # Giả định tốc độ trung bình trong phố
-    return (dist_km / speed_kmh) * 60 # phút
 
-def calculate_fitness(ind, user_prefs):
-    current_time = user_prefs.start_time * 60 # Đổi ra phút
-    end_time_limit = user_prefs.end_time * 60
+# =============================================================================
+#  DISTANCE & TRAVEL TIME  (Euclidean – Solomon benchmark compatible)
+# =============================================================================
 
-    total_score = 0
-    total_cost = 0
-    penalty = 0
+def euclidean_distance(p1: POI, p2: POI) -> float:
+    """Euclidean distance between two POIs in coordinate units."""
+    return math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
 
-    # Duyệt qua lộ trình
-    for i in range(len(ind.route) - 1):
-        curr = ind.route[i]
-        next_p = ind.route[i+1]
 
-        # 1. Tính Score theo sở thích
-        w = user_prefs.interests.get(curr.category, 1.0)
-        total_score += curr.base_score * w
-        total_cost += curr.price
+def get_travel_time(p1: POI, p2: POI) -> float:
+    """
+    Travel time between two POIs.
+    For Solomon benchmarks, travel time == Euclidean distance
+    (speed = 1 unit/time‐unit).
+    """
+    return euclidean_distance(p1, p2)
 
-        # 2. Di chuyển
+
+# =============================================================================
+#  CONSTRAINT CHECKING  (TOPTW feasibility)
+# =============================================================================
+
+def check_constraints(route: list[POI], user_prefs: UserPreferences) -> bool:
+    """
+    Validate whether a COMPLETE route [Depot, ..., Depot] satisfies all
+    TOPTW constraints:
+      1. Time Windows  – arrive at each POI before its close_time.
+      2. Max Tour Time – return to depot before user_prefs.end_time (== depot close).
+      3. Budget        – total price of visited POIs ≤ user_prefs.budget.
+    
+    Time is simulated forward from depot departure at user_prefs.start_time.
+    If a vehicle arrives before open_time, it *waits* (no penalty, but time passes).
+
+    Returns True if ALL constraints are satisfied, False otherwise.
+    """
+    if len(route) < 2:
+        return False  # Must at least have [Depot, Depot]
+
+    current_time = user_prefs.start_time  # Solomon time unit
+    total_cost = 0.0
+
+    for i in range(len(route) - 1):
+        curr = route[i]
+        next_p = route[i + 1]
+
+        # --- Travel ---
         travel = get_travel_time(curr, next_p)
         arrival = current_time + travel
 
-        # 3. Check Time Window
-        open_min = next_p.open_time * 60
-        close_min = next_p.close_time * 60
+        # --- Time Window ---
+        # Wait if arrived too early
+        if arrival < next_p.open_time:
+            arrival = next_p.open_time
 
-        if arrival < open_min:
-            wait = open_min - arrival
-            arrival = open_min # Phải chờ đến khi mở cửa
-        else:
-            wait = 0
+        # Infeasible if arrived after closing
+        if arrival > next_p.close_time:
+            return False
 
-        if arrival > close_min:
-            # Phạt nặng nếu đến muộn
-            over = arrival - close_min
-            penalty += over * 100
+        # --- Service ---
+        departure = arrival + next_p.duration
+        current_time = departure
 
-            # Thời gian tham quan (giả sử 60p)
-        leave = arrival + 60
-        current_time = leave
+        # --- Budget ---
+        total_cost += next_p.price
 
-    # 4. Phạt ngân sách
+    # Budget constraint
+    if total_cost > user_prefs.budget:
+        return False
+
+    return True
+
+
+def try_add_poi(route: list[POI], candidate: POI,
+                user_prefs: UserPreferences) -> bool:
+    """
+    Check if `candidate` can be *inserted just before the trailing Depot*
+    while keeping the route feasible.
+    
+    The route is assumed to be [Depot, ..., (last‐visited)] WITHOUT
+    the trailing Depot yet (the depot is appended temporarily for checking).
+    
+    Returns True if the route [*route, candidate, Depot] satisfies constraints.
+    """
+    depot = route[0]  # Depot is always the first element
+    test_route = route + [candidate, depot]
+    return check_constraints(test_route, user_prefs)
+
+
+# =============================================================================
+#  FITNESS EVALUATION
+# =============================================================================
+
+def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
+    """
+    Evaluate fitness of an Individual.
+
+    Fitness = Σ (base_score x interest_weight) - penalties.
+
+    Penalties cover:
+      • Time-window violation
+      • Budget overrun
+      • Late return to depot
+    """
+    current_time = user_prefs.start_time
+    total_score = 0.0
+    total_cost = 0.0
+    penalty = 0.0
+
+    for i in range(len(ind.route) - 1):
+        curr = ind.route[i]
+        next_p = ind.route[i + 1]
+
+        # --- Score (skip depot; its category is 'depot') ---
+        w = user_prefs.interests.get(curr.category, 0.0)
+        total_score += curr.base_score * w
+        total_cost += curr.price
+
+        # --- Travel ---
+        travel = get_travel_time(curr, next_p)
+        arrival = current_time + travel
+
+        # --- Time Window ---
+        if arrival < next_p.open_time:
+            arrival = next_p.open_time  # Wait
+
+        if arrival > next_p.close_time:
+            over = arrival - next_p.close_time
+            penalty += over * 100  # Heavy penalty for late arrival
+
+        # --- Service ---
+        departure = arrival + next_p.duration
+        current_time = departure
+
+    # Budget penalty
     if total_cost > user_prefs.budget:
         penalty += (total_cost - user_prefs.budget) * 0.5
 
-    # 5. Phạt quá giờ về
+    # Late return penalty (check against depot close_time or user end_time)
+    end_time_limit = user_prefs.end_time
     if current_time > end_time_limit:
         penalty += (current_time - end_time_limit) * 100
 
