@@ -40,7 +40,7 @@ def _labadie_ratio(poi: POI, current_location: POI,
     Higher ratio → more desirable candidate.
     If distance == 0, return +inf to strongly favour that POI.
     """
-    interest_weight = user_prefs.interests.get(poi.category, 0.0)
+    interest_weight = user_prefs.interest_weights.get(poi.category, 0.0)
     numerator = poi.base_score * interest_weight
 
     dist = euclidean_distance(current_location, poi)

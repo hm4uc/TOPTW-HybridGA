@@ -116,7 +116,7 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
         next_p = ind.route[i + 1]
 
         # --- Score (skip depot; its category is 'depot') ---
-        w = user_prefs.interests.get(curr.category, 0.0)
+        w = user_prefs.interest_weights.get(curr.category, 0.0)
         total_score += curr.base_score * w
         total_cost += curr.price
 

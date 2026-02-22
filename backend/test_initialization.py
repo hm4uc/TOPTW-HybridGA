@@ -18,11 +18,11 @@ user_prefs = UserPreferences(
     end_time=1236,           # Solomon depot closes at time 1236
     start_node_id=0,
     interests={
-        "history_culture": 1.5,
-        "nature_parks": 1.0,
-        "food_drink": 1.2,
-        "shopping": 0.5,
-        "entertainment": 0.8,
+        "history_culture": 4,   # 4 sao → w = 1.5  (quan tâm nhiều)
+        "nature_parks":    3,   # 3 sao → w = 1.0  (trung bình)
+        "food_drink":      4,   # 4 sao → w = 1.5  (quan tâm nhiều)
+        "shopping":        2,   # 2 sao → w = 0.5  (ít quan tâm)
+        "entertainment":   3,   # 3 sao → w = 1.0  (trung bình)
     },
 )
 
