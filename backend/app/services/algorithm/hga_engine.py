@@ -48,7 +48,9 @@ class HybridGeneticAlgorithm:
         self.poi_map = {p.id: p for p in self.pois}
         self.population_size = POPULATION_SIZE   # 50
         self.mutation_rate   = 0.3
-        self.generations     = 50
+        self.generations     = 200               # Max cap (early stopping sẽ bảo vệ)
+        self.stagnation_limit = 15               # Dừng nếu 15 gen không cải thiện
+        self.improvement_threshold = 1e-4        # Min delta để tính là "cải thiện"
         self.elitism_rate    = 2
         self.tournament_k    = 3
         self.population: list[Individual] = []
@@ -304,22 +306,31 @@ class HybridGeneticAlgorithm:
         return ind
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Main Loop (với Enhanced Logging — Bước 4)
+    #  Main Loop — Early Stopping + Enhanced Logging
     # ══════════════════════════════════════════════════════════════════════════
     def run(self) -> Individual:
         """
         Chạy vòng lặp tiến hóa chính của Hybrid GA.
 
+        ★ EARLY STOPPING ★
+          Nếu best fitness không cải thiện (>= threshold) trong
+          `stagnation_limit` thế hệ liên tiếp → dừng sớm.
+          Giúp API phản hồi nhanh hơn khi thuật toán đã hội tụ.
+
         Log mỗi thế hệ:
-          • Best Fitness
-          • Average Fitness
-          • Unique Routes (số lộ trình khác nhau / tổng quần thể)
-          → Giúp phát hiện Premature Convergence & Stagnation.
+          • Best Fitness / Average Fitness
+          • Unique Routes (diversity)
+          • Wait Time (best individual)
+          • Stagnation counter (bao nhiêu gen chưa cải thiện)
         """
         self.initialize_population()
         best_ever = self.population[0]
+        gens_without_improvement = 0
+        actual_gens = 0
 
         for gen in range(self.generations):
+            actual_gens = gen + 1
+
             new_population: list[Individual] = list(
                 self.population[:self.elitism_rate]
             )
@@ -343,11 +354,15 @@ class HybridGeneticAlgorithm:
             new_population.sort(key=lambda ind: ind.fitness, reverse=True)
             self.population = new_population
 
-            # ── Cập nhật Best Ever ────────────────────────────────────────────
-            if self.population[0].fitness > best_ever.fitness:
+            # ── Cập nhật Best Ever + Early Stopping ───────────────────────────
+            improvement = self.population[0].fitness - best_ever.fitness
+            if improvement > self.improvement_threshold:
                 best_ever = self.population[0]
+                gens_without_improvement = 0
+            else:
+                gens_without_improvement += 1
 
-            # ── Enhanced Logging (Bước 4) ─────────────────────────────────────
+            # ── Enhanced Logging ──────────────────────────────────────────────
             best_fit = self.population[0].fitness
             avg_fit = sum(ind.fitness for ind in self.population) / len(self.population)
 
@@ -363,10 +378,22 @@ class HybridGeneticAlgorithm:
                 f"Avg = {avg_fit:8.2f} | "
                 f"Unique = {unique_routes:>2}/{self.population_size} | "
                 f"Wait = {self.population[0].total_wait:6.1f} | "
-                f"Dup replaced = {duplicates_replaced}"
+                f"Stag = {gens_without_improvement:>2}/{self.stagnation_limit} | "
+                f"Dup = {duplicates_replaced}"
             )
 
+            # ── Early Stopping Check ──────────────────────────────────────────
+            if gens_without_improvement >= self.stagnation_limit:
+                print(
+                    f"\n[HGA] ★ EARLY STOPPING ★ "
+                    f"Best fitness không cải thiện trong "
+                    f"{self.stagnation_limit} thế hệ liên tiếp. "
+                    f"Dừng tại gen {gen + 1}/{self.generations}."
+                )
+                break
+
         print(f"\n[HGA] ═══ KẾT QUẢ CUỐI CÙNG ═══")
+        print(f"      Generations run   = {actual_gens}/{self.generations}")
         print(f"      Best-ever fitness = {best_ever.fitness:.2f}")
         print(f"      Total wait time   = {best_ever.total_wait:.1f}")
         print(f"      Route IDs   : {[p.id for p in best_ever.route]}")
