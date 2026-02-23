@@ -362,11 +362,13 @@ class HybridGeneticAlgorithm:
                 f"Best = {best_fit:8.2f} | "
                 f"Avg = {avg_fit:8.2f} | "
                 f"Unique = {unique_routes:>2}/{self.population_size} | "
+                f"Wait = {self.population[0].total_wait:6.1f} | "
                 f"Dup replaced = {duplicates_replaced}"
             )
 
         print(f"\n[HGA] ═══ KẾT QUẢ CUỐI CÙNG ═══")
         print(f"      Best-ever fitness = {best_ever.fitness:.2f}")
+        print(f"      Total wait time   = {best_ever.total_wait:.1f}")
         print(f"      Route IDs   : {[p.id for p in best_ever.route]}")
         print(f"      Route length: {len(best_ever.route)} nodes "
               f"({len(best_ever.route) - 2} POIs + 2 Depot)")

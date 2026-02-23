@@ -149,21 +149,48 @@ def try_add_poi(route: list[POI], candidate: POI,
 # =============================================================================
 #  FITNESS EVALUATION
 # =============================================================================
+#
+#  Bảng hệ số phạt (Penalty Coefficients):
+#  ┌─────────────────────────┬────────────┬──────────────────────────────────┐
+#  │ Loại phạt               │  Hệ số     │  Mục đích                        │
+#  ├─────────────────────────┼────────────┼──────────────────────────────────┤
+#  │ Trễ giờ (> close_time)  │  100.0     │  Vi phạm ràng buộc CỨNG          │
+#  │ Về depot trễ            │  100.0     │  Vi phạm ràng buộc CỨNG          │
+#  │ Lố ngân sách            │    0.5     │  Ràng buộc mềm                   │
+#  │ Thời gian chờ           │    0.2     │  Chất lượng trải nghiệm du lịch  │
+#  └─────────────────────────┴────────────┴──────────────────────────────────┘
+#
+#  Chờ 15'  → phạt  3.0   (bình thường, ghé cafe)
+#  Chờ 30'  → phạt  6.0   (hơi khó chịu)
+#  Chờ 60'  → phạt 12.0   (tệ → GA cố tránh)
+#  Chờ 120' → phạt 24.0   (rất tệ → GA gần như chắc chắn tránh)
+#
+# =============================================================================
+
+PENALTY_LATE_ARRIVAL  = 100.0   # Đến sau close_time  (ràng buộc cứng)
+PENALTY_LATE_RETURN   = 100.0   # Về depot trễ        (ràng buộc cứng)
+PENALTY_BUDGET        =   0.5   # Vượt ngân sách      (ràng buộc mềm)
+PENALTY_WAIT          =   0.2   # Thời gian chờ       (chất lượng trải nghiệm)
+
 
 def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
     """
     Evaluate fitness of an Individual.
 
-    Fitness = Σ (base_score x interest_weight) - penalties.
+    Fitness = Σ (base_score × interest_weight) − penalties.
 
     Penalties cover:
-      • Time-window violation
-      • Budget overrun
-      • Late return to depot
+      • Time-window violation  – arrive after close_time       (×100.0)
+      • Late return to depot   – return after end_time          (×100.0)
+      • Budget overrun         – total price > budget           (× 0.5)
+      • Waiting time           – arrive before open_time        (× 0.2)
+        → Ép GA sắp xếp thứ tự POI sao cho đến nơi là vào chơi luôn,
+          tránh bắt du khách chờ ngoài cửa.
     """
     current_time = user_prefs.start_time
     total_score = 0.0
     total_cost = 0.0
+    total_wait = 0.0
     penalty = 0.0
 
     for i in range(len(ind.route) - 1):
@@ -181,11 +208,14 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
 
         # --- Time Window ---
         if arrival < next_p.open_time:
-            arrival = next_p.open_time  # Wait
+            wait = next_p.open_time - arrival
+            total_wait += wait
+            penalty += wait * PENALTY_WAIT          # ★ Phạt chờ
+            arrival = next_p.open_time              # Vẫn phải chờ đến giờ mở
 
         if arrival > next_p.close_time:
             over = arrival - next_p.close_time
-            penalty += over * 100  # Heavy penalty for late arrival
+            penalty += over * PENALTY_LATE_ARRIVAL   # Phạt trễ giờ
 
         # --- Service ---
         departure = arrival + next_p.duration
@@ -193,16 +223,17 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
 
     # Budget penalty
     if total_cost > user_prefs.budget:
-        penalty += (total_cost - user_prefs.budget) * 0.5
+        penalty += (total_cost - user_prefs.budget) * PENALTY_BUDGET
 
     # Late return penalty (check against depot close_time or user end_time)
     end_time_limit = user_prefs.end_time
     if current_time > end_time_limit:
-        penalty += (current_time - end_time_limit) * 100
+        penalty += (current_time - end_time_limit) * PENALTY_LATE_RETURN
 
     ind.fitness = total_score - penalty
     ind.total_score = total_score
     ind.total_cost = total_cost
     ind.total_time = current_time
+    ind.total_wait = total_wait
 
     return ind.fitness

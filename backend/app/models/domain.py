@@ -34,6 +34,7 @@ class Individual:
         self.total_score: float = 0.0
         self.total_cost: float = 0.0
         self.total_time: float = 0.0
+        self.total_wait: float = 0.0   # Tổng thời gian chờ tại các POI
 
     def __repr__(self):
         ids = [p.id for p in self.route]
