@@ -31,6 +31,7 @@ from app.services.algorithm.fitness import (
     calculate_fitness,
     check_constraints,
     get_travel_time,
+    build_distance_matrix,
 )
 
 
@@ -38,6 +39,9 @@ class HybridGeneticAlgorithm:
     def __init__(self, user_prefs: UserPreferences):
         self.user_prefs = user_prefs
         self.pois = load_solomon_c101()
+
+        # ── Pre-compute Distance Matrix (O(1) lookups) ────────────────────
+        build_distance_matrix(self.pois)
         self.depot: Optional[POI] = next(
             (p for p in self.pois if p.id == 0), None
         )

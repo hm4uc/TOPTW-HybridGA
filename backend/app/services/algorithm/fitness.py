@@ -1,23 +1,78 @@
 import math
+from typing import List, Optional
 from app.models.domain import POI
 from app.models.schemas import UserPreferences
 
 
 # =============================================================================
-#  DISTANCE & TRAVEL TIME  (Euclidean – Solomon benchmark compatible)
+#  DISTANCE MATRIX  (O(1) lookup – pre-computed at startup)
 # =============================================================================
+#
+#  Thay vì gọi math.sqrt() hàng triệu lần trong quá trình GA, ta tính
+#  trước ma trận khoảng cách N×N một lần duy nhất khi load dữ liệu.
+#  Mọi tra cứu sau đó chỉ mất O(1) (truy cập mảng 2D).
+#  Với 101 POI → ma trận 101×101 = ~10 201 giá trị float ≈ 80 KB RAM.
+#
+# =============================================================================
+
+# Module-level distance matrix – initialized by build_distance_matrix()
+_DIST_MATRIX: Optional[list[list[float]]] = None
+
 
 def euclidean_distance(p1: POI, p2: POI) -> float:
     """Euclidean distance between two POIs in coordinate units."""
     return math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2)
 
 
+def build_distance_matrix(pois: List[POI]) -> list[list[float]]:
+    """
+    Pre-compute the full N×N Euclidean distance matrix.
+
+    Must be called ONCE at startup (after loading POIs).
+    Subsequent calls to get_travel_time() will use O(1) lookups.
+
+    Parameters
+    ----------
+    pois : list[POI]
+        All POIs (including depot). POI ids must be 0..N-1.
+
+    Returns
+    -------
+    list[list[float]]
+        2D matrix where matrix[i][j] = Euclidean distance from POI i to POI j.
+    """
+    global _DIST_MATRIX
+    n = len(pois)
+
+    # Sort by id to guarantee matrix[poi.id] maps correctly
+    sorted_pois = sorted(pois, key=lambda p: p.id)
+
+    matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        pi = sorted_pois[i]
+        for j in range(i + 1, n):
+            pj = sorted_pois[j]
+            d = math.sqrt((pi.x - pj.x) ** 2 + (pi.y - pj.y) ** 2)
+            matrix[i][j] = d
+            matrix[j][i] = d  # Symmetric
+
+    _DIST_MATRIX = matrix
+    print(f"[DistMatrix] Built {n}×{n} distance matrix ({n*n} entries)")
+    return matrix
+
+
 def get_travel_time(p1: POI, p2: POI) -> float:
     """
     Travel time between two POIs.
     For Solomon benchmarks, travel time == Euclidean distance
-    (speed = 1 unit/time‐unit).
+    (speed = 1 unit/time-unit).
+
+    Uses pre-computed distance matrix for O(1) lookup.
+    Falls back to direct calculation if matrix is not yet initialized.
     """
+    if _DIST_MATRIX is not None:
+        return _DIST_MATRIX[p1.id][p2.id]
+    # Fallback (should not happen in normal flow)
     return euclidean_distance(p1, p2)
 
 

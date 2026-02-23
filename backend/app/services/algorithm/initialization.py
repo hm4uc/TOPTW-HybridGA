@@ -9,13 +9,12 @@ Total population size: 50 (fixed).
 """
 
 import random
-import math
 from typing import List
 
 from app.models.domain import POI, Individual
 from app.models.schemas import UserPreferences
 from app.services.algorithm.fitness import (
-    euclidean_distance,
+    get_travel_time,
     try_add_poi,
 )
 
@@ -43,7 +42,7 @@ def _labadie_ratio(poi: POI, current_location: POI,
     interest_weight = user_prefs.interest_weights.get(poi.category, 0.0)
     numerator = poi.base_score * interest_weight
 
-    dist = euclidean_distance(current_location, poi)
+    dist = get_travel_time(current_location, poi)
     if dist == 0:
         return float('inf')
 
