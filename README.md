@@ -1,65 +1,121 @@
-# Personalized Tourist Trip Design Algorithm - Hybrid Genetic Algorithm
+# Thuật toán Hybrid GA cho bài toán TOPTW - Lập lịch trình du lịch cá nhân hóa
 
-![Python](https://img.shields.io/badge/Backend-Python%20FastAPI-blue)
-![Flutter](https://img.shields.io/badge/Mobile-Flutter-02569B)
-![License](https://img.shields.io/github/license/hm4uc/TOPTW-HybridGA)
+## Giới thiệu
 
-## 📖 Introduction
-This repository contains the source code for the Bachelor Thesis: **"Building a Context-Aware Tourist Trip Planner System based on Hybrid Genetic Algorithm"**.
+Mã nguồn Khóa luận tốt nghiệp: **"Xây dựng hệ thống lập lịch trình du lịch theo ngữ cảnh dựa trên thuật toán di truyền lai (Hybrid GA)"**.
 
-The system solves the **Team Orienteering Problem with Time Windows (TOPTW)** by focusing on user personalization. Instead of using static scores, the algorithm optimizes the itinerary based on individual user interests (User-Dependent Scores), Budget, and Time Constraints.
+Hệ thống giải bài toán **Team Orienteering Problem with Time Windows (TOPTW)** theo hướng cá nhân hóa. Thay vì dùng điểm số tĩnh, thuật toán tối ưu lộ trình dựa trên sở thích cá nhân (User-Dependent Scores), ngân sách và ràng buộc thời gian của người dùng.
 
-## 🚀 Key Features
-* **User-Centric Optimization:** Maximizes total trip score based on user preferences (Culture, Food, Nature, etc.).
-* **Hybrid Genetic Algorithm (HGA):** * Integrates **Genetic Algorithm (GA)** for global exploration.
-    * Incorporates **2-opt Local Search (Smart Mutation)** for fast convergence and route refinement.
-* **Constraints Handling:** Efficiently handles Hard Constraints:
-    * 💰 Budget Limits.
-    * ⏰ Time Budget (Start/End time).
-    * ⏳ Time Windows (Opening/Closing hours of POIs).
-* **Cross-Platform Mobile App:** Built with Flutter for visualizing routes on Google Maps.
+## Tính năng chính
 
-## 🛠 Tech Stack
+- **Tối ưu theo sở thích**: Tối đa hóa tổng điểm dựa trên mức quan tâm của người dùng với 5 loại hình (Lịch sử - Văn hóa, Thiên nhiên, Ẩm thực, Mua sắm, Giải trí).
+- **Thuật toán di truyền lai (HGA)**:
+  - Giải thuật Di truyền (GA) cho khám phá không gian nghiệm toàn cục.
+  - Tìm kiếm cục bộ 2-opt (Smart Mutation) để hội tụ nhanh và tinh chỉnh tuyến đường.
+  - Insertion Mutation để chèn POI mới, tăng điểm từ thời gian dư.
+  - Smart Repair loại bỏ POI có tỷ lệ Score/Time kém nhất khi vi phạm ràng buộc.
+- **Xử lý ràng buộc cứng**: Ngân sách, khung giờ chuyến đi (Start/End time), cửa sổ thời gian (Opening/Closing hours) của từng POI.
+- **Khởi tạo quần thể 2 chiến lược**: 80% Randomized Insertion Heuristic (Labadie ratio), 20% Pure Random.
+- **Ứng dụng di động đa nề tảng**: Flutter hiển thị lộ trình trên Google Maps.
 
-### Backend (Computational Core)
-* **Language:** Python 3.13.9
-* **Framework:** FastAPI
-* **Libraries:** NumPy, Uvicorn.
-* **Algorithm:** Custom implementation of Hybrid GA using OOP.
+## Công nghệ sử dụng
 
-### Mobile (Client)
-* **Framework:** Flutter (Dart)
-* **Maps:** Google Maps SDK
-* **State Management:** Bloc
+### Backend
 
-## 📂 Project Structure
+| Thành phần | Chi tiết |
+|---|---|
+| Ngôn ngữ | Python 3.13 |
+| Framework | FastAPI |
+| Thư viện | NumPy, Pandas, Pydantic, Uvicorn |
+| Thuật toán | Hybrid GA tự triển khai theo OOP |
+| Dữ liệu | Solomon Benchmark C101 (CSV) |
 
-```text
+### Mobile
+
+| Thành phần | Chi tiết |
+|---|---|
+| Framework | Flutter (Dart), SDK ^3.10 |
+| Bản đồ | Google Maps SDK |
+
+## Cấu trúc thư mục
+
+```
 TOPTW-HybridGA/
-├── backend/                # Python Server & Algorithm
+├── backend/
 │   ├── app/
-│   │   ├── main.py         # API Entry point
-│   │   ├── models/         # Data structures (POI, UserProfile)
-│   │   ├── algorithms/     # Genetic Algorithm Core
-│   │   │   ├── ga.py       # Main Loop
-│   │   │   ├── operators.py# Crossover & Selection
-│   │   │   └── hybrid.py   # 2-opt Local Search (Smart Mutation)
-│   ├── data/               # Solomon Benchmark & Real POI Data
-│   └── requirements.txt    # Python dependencies
-│
-├── mobile/                 # Flutter Application
+│   │   ├── main.py                  # Entry point, khởi tạo FastAPI
+│   │   ├── api/
+│   │   │   └── routes.py            # API endpoint /api/optimize
+│   │   ├── models/
+│   │   │   ├── domain.py            # Lớp POI, Individual
+│   │   │   └── schemas.py           # Request/Response schemas (Pydantic)
+│   │   └── services/
+│   │       ├── data_loader.py       # Đọc và cache dữ liệu Solomon C101
+│   │       └── algorithm/
+│   │           ├── hga_engine.py    # Vòng lặp chính HGA (Selection, Crossover, Mutation, Repair)
+│   │           ├── initialization.py # Khởi tạo quần thể (Heuristic + Random)
+│   │           ├── fitness.py       # Hàm fitness, kiểm tra ràng buộc, ma trận khoảng cách
+│   │           └── mutation.py      # 2-opt Local Search (Smart Mutation)
+│   ├── data/
+│   │   └── solomon_instances/       # Bộ dữ liệu benchmark (C101.csv, C102.csv, RC101.csv)
+│   └── requirements.txt
+├── mobile/                          # Ứng dụng Flutter
 │   ├── lib/
-│   │   ├── screens/        # UI Screens (Input, Map)
-│   │   ├── services/       # API Connectors
 │   │   └── main.dart
 │   └── pubspec.yaml
+├── references/                      # Tài liệu tham khảo (PDF)
+├── LICENSE
 └── README.md
 ```
 
-## 📝 License
+## API
 
-Distributed under the MIT License. See LICENSE for more information.
+### POST /api/optimize
 
-**Author:** Hoàng Minh Đức
+**Request Body:**
 
-**Faculty of Information Technology - VNU UET**
+```json
+{
+  "budget": 500000,
+  "start_time": 8.0,
+  "end_time": 17.0,
+  "start_node_id": 0,
+  "interests": {
+    "history_culture": 5,
+    "nature_parks": 3,
+    "food_drink": 4,
+    "shopping": 1,
+    "entertainment": 2
+  }
+}
+```
+
+**Response:** Trả về lộ trình tối ưu gồm tổng điểm, tổng chi phí, tổng thời gian, thời gian chạy thuật toán và danh sách các điểm tham quan theo thứ tự (bao gồm thời gian đến, chờ, bắt đầu, rời đi tại mỗi điểm).
+
+## Cài đặt và chạy
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+Server chạy tại `http://localhost:8000`. Tài liệu API tự động tại `http://localhost:8000/docs`.
+
+### Mobile
+
+```bash
+cd mobile
+flutter pub get
+flutter run
+```
+
+## Giấy phép
+
+Phân phối theo giấy phép MIT. Xem file LICENSE để biết thêm chi tiết.
+
+**Tác giả:** Hoàng Minh Đức
+
+**Khoa Công nghệ Thông tin - Đại học Công nghệ, ĐHQGHN**

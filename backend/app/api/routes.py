@@ -1,40 +1,73 @@
-from fastapi import APIRouter
-from app.schemas.trip import UserPreferences, TripResponse, PoiDetail
-from app.services.data_loader import load_pois
-from app.services.algorithm.ga_engine import GeneticAlgorithm
-import time
+from fastapi import APIRouter, HTTPException
+from pydantic import ValidationError
+import logging
+from app.models.schemas import OptimizationResponse, UserPreferences
+from app.services.algorithm.hga_engine import HybridGeneticAlgorithm
+from app.services.data_loader import load_solomon_c101
 
 router = APIRouter()
-pois_db = load_pois() # Load dữ liệu khi khởi động
+logger = logging.getLogger(__name__)
 
-@router.post("/optimize", response_model=TripResponse)
-async def optimize_trip(prefs: UserPreferences):
-    start_time = time.time()
 
-    # 1. Khởi tạo thuật toán
-    ga = GeneticAlgorithm(pois_db, prefs)
+@router.post("/optimize", response_model=OptimizationResponse)
+async def optimize_itinerary(request: UserPreferences):
+    """
+    Endpoint tối ưu hóa lộ trình du lịch.
 
-    # 2. Chạy
-    best_ind = ga.run()
+    Validation layers:
+      1. Pydantic model validation (budget, thời gian, interests) → 422
+      2. Business logic validation (start_node_id, khung giờ) → 400
+      3. HGA execution → 500 nếu lỗi hệ thống
+      4. Result validation (route rỗng) → 404
+    """
+    try:
+        logger.info("Received optimization request with preferences: %s", request)
 
-    # 3. Format kết quả trả về
-    execution_time = time.time() - start_time
+        # ── Edge Case 6: Validate start_node_id exists in dataset ─────────
+        pois = load_solomon_c101()
+        valid_ids = {p.id for p in pois}
+        if request.start_node_id not in valid_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Điểm xuất phát (start_node_id={request.start_node_id}) "
+                    f"không tồn tại trong dataset. "
+                    f"ID hợp lệ: 0 đến {max(valid_ids)}."
+                ),
+            )
 
-    response_route = []
-    # (Lưu ý: Logic tính giờ đến/đi chi tiết cần mapping lại từ hàm fitness)
-    # Ở đây return dummy time cho các điểm để test flow
-    curr_t = prefs.start_time
-    for p in best_ind.route:
-        response_route.append(PoiDetail(
-            id=p.id, name=p.name, lat=p.lat, lon=p.lon,
-            arrival_time=curr_t, leave_time=curr_t+1, price=p.price
-        ))
-        curr_t += 1.5
+        # ── Run HGA ───────────────────────────────────────────────────────
+        hga_solver = HybridGeneticAlgorithm(request)
+        result = hga_solver.run()
 
-    return TripResponse(
-        total_score=best_ind.total_score,
-        total_cost=best_ind.total_cost,
-        total_time=best_ind.total_time,
-        route=response_route,
-        execution_time=execution_time
-    )
+        # ── Edge Case 7: GA trả về route rỗng [Depot, Depot] ─────────────
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail="Không tìm được lộ trình khả thi với các tùy chọn đã cho.",
+            )
+
+        # Kiểm tra route chỉ có Depot (không ghé được POI nào)
+        if hasattr(result, 'route') and len(result.route) <= 2:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Không thể ghé thăm bất kỳ điểm nào trong khung thời gian "
+                    f"và ngân sách đã cho ({request.start_time}h → {request.end_time}h, "
+                    f"budget={request.budget:,.0f}). "
+                    "Hãy thử mở rộng khung giờ hoặc tăng ngân sách."
+                ),
+            )
+
+        return result
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (đã có status code rõ ràng)
+        raise
+
+    except Exception as e:
+        logger.error("Error during optimization: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Đã xảy ra lỗi trong quá trình tối ưu hóa lộ trình.",
+        )

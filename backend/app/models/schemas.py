@@ -1,0 +1,161 @@
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Dict, List, Optional
+
+# =============================================================================
+#  Hằng số cấu hình
+# =============================================================================
+MIN_TOUR_DURATION_HOURS = 1.0   # Tối thiểu 1 giờ để lập lịch trình
+
+
+# =============================================================================
+#  Bảng ánh xạ: số sao người dùng chọn → trọng số dùng trong thuật toán
+# =============================================================================
+STAR_TO_WEIGHT: Dict[int, float] = {
+    1: 0.1,   # Không quan tâm
+    2: 0.5,   # Ít quan tâm
+    3: 1.0,   # Trung bình (mức cơ sở)
+    4: 1.5,   # Quan tâm nhiều
+    5: 2.0,   # Rất quan tâm / ưu tiên cao nhất
+}
+
+# Danh sách category hợp lệ
+VALID_CATEGORIES = {
+    'history_culture', 'nature_parks', 'food_drink', 'shopping', 'entertainment'
+}
+
+
+# Input from user
+class UserPreferences(BaseModel):
+    budget: float = Field(..., description="Ngân sách tối đa cho chuyến đi")
+    start_time: float = Field(8.0, description="Thời gian bắt đầu chuyến đi (giờ)")
+    end_time: float = Field(17.0, description="Thời gian kết thúc chuyến đi (giờ)")
+    start_node_id: int = Field(..., description="ID điểm xuất phát (depot)")
+    interests: Dict[str, int] = Field(
+        ...,
+        description=(
+            "Mức độ quan tâm của người dùng với từng loại hình địa điểm, "
+            "tính bằng số sao từ 1 đến 5. "
+            "Key phải thuộc: history_culture, nature_parks, food_drink, shopping, entertainment. "
+            "1 sao = không quan tâm (w=0.1), 2 sao = ít quan tâm (w=0.5), "
+            "3 sao = trung bình (w=1.0), 4 sao = quan tâm nhiều (w=1.5), "
+            "5 sao = rất quan tâm (w=2.0)."
+        )
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Field Validators
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @field_validator('budget')
+    @classmethod
+    def validate_budget(cls, v: float) -> float:
+        """Ngân sách phải dương."""
+        if v <= 0:
+            raise ValueError(
+                f"Ngân sách phải lớn hơn 0, nhận được: {v}"
+            )
+        return v
+
+    @field_validator('interests')
+    @classmethod
+    def validate_interests(cls, v: Dict[str, int]) -> Dict[str, int]:
+        """
+        Kiểm tra:
+          1. Phải có đủ 5 category bắt buộc.
+          2. Không có key lạ.
+          3. Giá trị sao nằm trong [1, 5].
+        """
+        # Kiểm tra thiếu category
+        missing = VALID_CATEGORIES - set(v.keys())
+        if missing:
+            raise ValueError(
+                f"Thiếu đánh giá cho các category: {sorted(missing)}. "
+                f"Phải cung cấp đủ 5 category: {sorted(VALID_CATEGORIES)}"
+            )
+
+        for category, stars in v.items():
+            if category not in VALID_CATEGORIES:
+                raise ValueError(
+                    f"Category '{category}' không hợp lệ. "
+                    f"Phải thuộc: {sorted(VALID_CATEGORIES)}"
+                )
+            if stars not in STAR_TO_WEIGHT:
+                raise ValueError(
+                    f"Số sao cho '{category}' phải là số nguyên từ 1 đến 5, "
+                    f"nhận được: {stars}"
+                )
+        return v
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Model Validator  (cross-field validation)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @model_validator(mode='after')
+    def validate_time_range(self) -> 'UserPreferences':
+        """
+        Edge Case 3: start_time >= end_time → vô lý, reject ngay.
+        Edge Case 1: end_time - start_time < MIN_TOUR_DURATION_HOURS → quá ngắn.
+        """
+        if self.start_time >= self.end_time:
+            raise ValueError(
+                f"Thời gian bắt đầu ({self.start_time}h) phải nhỏ hơn "
+                f"thời gian kết thúc ({self.end_time}h)."
+            )
+
+        duration = self.end_time - self.start_time
+        if duration < MIN_TOUR_DURATION_HOURS:
+            raise ValueError(
+                f"Khung thời gian quá ngắn để lập lịch trình. "
+                f"Thời lượng tối thiểu: {MIN_TOUR_DURATION_HOURS} giờ, "
+                f"nhận được: {duration:.1f} giờ "
+                f"({self.start_time}h → {self.end_time}h)."
+            )
+
+        return self
+
+    @property
+    def interest_weights(self) -> Dict[str, float]:
+        """
+        Chuyển đổi số sao → trọng số float ĐÃ CHUẨN HÓA để thuật toán sử dụng.
+
+        ★ NORMALIZATION (Edge Case 2) ★
+          Khi tất cả category có cùng số sao (VD: toàn bộ 1★ hoặc toàn bộ 5★),
+          raw weights sẽ giống nhau → thuật toán không phân biệt được category.
+
+          Giải pháp: Normalize trọng số sao cho:
+            • Tổng trọng số = len(interests) (trung bình = 1.0 mỗi category)
+            • Nếu tất cả bằng nhau → mỗi cái = 1.0 → GA vẫn phân biệt POI
+              bằng base_score (DEMAND), đảm bảo công bằng.
+            • Nếu có sự khác biệt → tỷ lệ giữ nguyên, chỉ scale lại.
+        """
+        raw = {cat: STAR_TO_WEIGHT[stars] for cat, stars in self.interests.items()}
+
+        total = sum(raw.values())
+        if total == 0:
+            # Edge case cực đoan: không nên xảy ra vì min star = 1 → w = 0.1
+            return {cat: 1.0 for cat in raw}
+
+        n = len(raw)
+        # Scale sao cho tổng = n → trung bình mỗi category = 1.0
+        scale = n / total
+        return {cat: w * scale for cat, w in raw.items()}
+
+# Output
+class ItineraryItem(BaseModel):
+    order: int = Field(..., description="Thứ tự trong lộ trình")
+    id: int = Field(..., description="ID điểm tham quan")
+    name: str = Field(..., description="Tên điểm tham quan")
+    category: Optional[str] = Field(None, description="Loại điểm tham quan")
+    arrival: Optional[str] = Field(None, description="Thời gian đến (HH:MM)")
+    wait: Optional[int] = Field(0, description="Thời gian chờ (phút)")
+    start: Optional[str] = Field(None, description="Thời gian bắt đầu tham quan (HH:MM)")
+    leave: Optional[str] = Field(None, description="Thời gian rời đi (HH:MM)")
+    cost: float = Field(..., description="Chi phí tham quan")
+    score: float = Field(..., description="Điểm đạt được tại điểm tham quan")
+
+class OptimizationResponse(BaseModel):
+    total_score: float = Field(..., description="Tổng điểm đạt được")
+    total_cost: float = Field(..., description="Tổng chi phí")
+    total_duration: float = Field(..., description="Tổng thời gian chuyến đi (giờ)")
+    route: List[ItineraryItem] = Field(..., description="Lộ trình chi tiết")
+    execution_time: float = Field(..., description="Thời gian chạy thuật toán (giây)")
