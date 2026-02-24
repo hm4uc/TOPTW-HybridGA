@@ -1,5 +1,10 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Dict, List, Optional
+
+# =============================================================================
+#  Hằng số cấu hình
+# =============================================================================
+MIN_TOUR_DURATION_HOURS = 1.0   # Tối thiểu 1 giờ để lập lịch trình
 
 
 # =============================================================================
@@ -37,10 +42,37 @@ class UserPreferences(BaseModel):
         )
     )
 
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Field Validators
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @field_validator('budget')
+    @classmethod
+    def validate_budget(cls, v: float) -> float:
+        """Ngân sách phải dương."""
+        if v <= 0:
+            raise ValueError(
+                f"Ngân sách phải lớn hơn 0, nhận được: {v}"
+            )
+        return v
+
     @field_validator('interests')
     @classmethod
     def validate_interests(cls, v: Dict[str, int]) -> Dict[str, int]:
-        """Kiểm tra key hợp lệ và giá trị nằm trong khoảng [1, 5]."""
+        """
+        Kiểm tra:
+          1. Phải có đủ 5 category bắt buộc.
+          2. Không có key lạ.
+          3. Giá trị sao nằm trong [1, 5].
+        """
+        # Kiểm tra thiếu category
+        missing = VALID_CATEGORIES - set(v.keys())
+        if missing:
+            raise ValueError(
+                f"Thiếu đánh giá cho các category: {sorted(missing)}. "
+                f"Phải cung cấp đủ 5 category: {sorted(VALID_CATEGORIES)}"
+            )
+
         for category, stars in v.items():
             if category not in VALID_CATEGORIES:
                 raise ValueError(
@@ -54,13 +86,59 @@ class UserPreferences(BaseModel):
                 )
         return v
 
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Model Validator  (cross-field validation)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @model_validator(mode='after')
+    def validate_time_range(self) -> 'UserPreferences':
+        """
+        Edge Case 3: start_time >= end_time → vô lý, reject ngay.
+        Edge Case 1: end_time - start_time < MIN_TOUR_DURATION_HOURS → quá ngắn.
+        """
+        if self.start_time >= self.end_time:
+            raise ValueError(
+                f"Thời gian bắt đầu ({self.start_time}h) phải nhỏ hơn "
+                f"thời gian kết thúc ({self.end_time}h)."
+            )
+
+        duration = self.end_time - self.start_time
+        if duration < MIN_TOUR_DURATION_HOURS:
+            raise ValueError(
+                f"Khung thời gian quá ngắn để lập lịch trình. "
+                f"Thời lượng tối thiểu: {MIN_TOUR_DURATION_HOURS} giờ, "
+                f"nhận được: {duration:.1f} giờ "
+                f"({self.start_time}h → {self.end_time}h)."
+            )
+
+        return self
+
     @property
     def interest_weights(self) -> Dict[str, float]:
         """
-        Chuyển đổi số sao → trọng số float để thuật toán sử dụng.
-        Category không được người dùng đánh giá sẽ có trọng số = 0.0.
+        Chuyển đổi số sao → trọng số float ĐÃ CHUẨN HÓA để thuật toán sử dụng.
+
+        ★ NORMALIZATION (Edge Case 2) ★
+          Khi tất cả category có cùng số sao (VD: toàn bộ 1★ hoặc toàn bộ 5★),
+          raw weights sẽ giống nhau → thuật toán không phân biệt được category.
+
+          Giải pháp: Normalize trọng số sao cho:
+            • Tổng trọng số = len(interests) (trung bình = 1.0 mỗi category)
+            • Nếu tất cả bằng nhau → mỗi cái = 1.0 → GA vẫn phân biệt POI
+              bằng base_score (DEMAND), đảm bảo công bằng.
+            • Nếu có sự khác biệt → tỷ lệ giữ nguyên, chỉ scale lại.
         """
-        return {cat: STAR_TO_WEIGHT[stars] for cat, stars in self.interests.items()}
+        raw = {cat: STAR_TO_WEIGHT[stars] for cat, stars in self.interests.items()}
+
+        total = sum(raw.values())
+        if total == 0:
+            # Edge case cực đoan: không nên xảy ra vì min star = 1 → w = 0.1
+            return {cat: 1.0 for cat in raw}
+
+        n = len(raw)
+        # Scale sao cho tổng = n → trung bình mỗi category = 1.0
+        scale = n / total
+        return {cat: w * scale for cat, w in raw.items()}
 
 # Output
 class ItineraryItem(BaseModel):

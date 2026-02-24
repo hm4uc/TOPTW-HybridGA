@@ -1,6 +1,8 @@
 import os
 import csv
+import copy
 import random
+from typing import Optional, List
 from app.models.domain import POI
 
 # --- DANH SÁCH CATEGORY CHUẨN ---
@@ -24,16 +26,28 @@ FREE_CATEGORIES = {'nature_parks', 'shopping'}
 PRICE_OPTIONS = [30_000.0, 50_000.0, 100_000.0]
 
 
-def load_solomon_c101() -> list[POI]:
+# =============================================================================
+#  IN-MEMORY CACHE  (Singleton Pattern)
+# =============================================================================
+#
+#  Đọc file CSV từ disk đúng 1 lần duy nhất → lưu vào RAM.
+#  Các request sau chỉ lấy deep copy từ bộ nhớ, tránh disk I/O lặp lại.
+#
+#  Tại sao deep copy mà không phải shallow copy?
+#    → GA engine MUTATE các object POI trong quá trình chạy (route manipulation).
+#    → Nếu dùng shallow copy, nhiều request đồng thời sẽ chia sẻ cùng
+#      object POI → race condition, data corruption.
+#    → Deep copy đảm bảo mỗi request có bản sao riêng, an toàn hoàn toàn.
+#
+# =============================================================================
+
+_POI_CACHE: Optional[List[POI]] = None
+
+
+def _load_from_disk() -> List[POI]:
     """
-    Load Solomon C101 benchmark dataset from CSV file.
-    Returns a list of POI objects. POI with id=0 is always the Depot.
-    
-    Note: CUST NO. starts from 1 in the CSV file. We treat the FIRST row (CUST NO. = 1)
-    as the Depot (id = 0). All subsequent customers are id = CUST_NO - 1... 
-    Actually, looking at the CSV: row 1 has CUST NO.=1 with DEMAND=0, READY TIME=0,
-    DUE DATE=1236, SERVICE TIME=0 — this is clearly the Depot.
-    We remap it: Depot gets id=0, others keep their CUST NO. as-is but shifted.
+    Internal: Đọc file C101.csv từ disk và parse thành list[POI].
+    Chỉ được gọi 1 lần duy nhất bởi load_solomon_c101().
     """
     file_path = os.path.join(os.getcwd(), 'data', 'solomon_instances', 'C101.csv')
 
@@ -81,3 +95,24 @@ def load_solomon_c101() -> list[POI]:
     print(f"[DataLoader] Loaded {len(pois)} POIs from C101.csv "
           f"(Depot id=0 at ({pois[0].x}, {pois[0].y}))")
     return pois
+
+
+def load_solomon_c101() -> list[POI]:
+    """
+    Load Solomon C101 benchmark dataset — CÓ CACHE.
+
+    Lần gọi đầu tiên: đọc từ disk → lưu vào _POI_CACHE.
+    Các lần gọi sau : trả deep copy từ RAM (không đọc disk).
+
+    Returns a list of POI objects. POI with id=0 is always the Depot.
+    """
+    global _POI_CACHE
+
+    if _POI_CACHE is None:
+        _POI_CACHE = _load_from_disk()
+        print(f"[DataLoader] Cache initialized: {len(_POI_CACHE)} POIs in RAM")
+    else:
+        print(f"[DataLoader] Cache HIT — returning {len(_POI_CACHE)} POIs from RAM")
+
+    # Deep copy để mỗi request có bản sao riêng, tránh race condition
+    return copy.deepcopy(_POI_CACHE)
