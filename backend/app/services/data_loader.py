@@ -19,11 +19,26 @@ CATEGORIES = [
 # history_culture: 35%, nature: 15%, food: 25%, shopping: 15%, entertainment: 10%
 CATEGORY_WEIGHTS = [0.35, 0.15, 0.25, 0.15, 0.10]
 
-# --- GIÁ VÉ GIẢ LẬP ---
-# Category miễn phí (không cần mua vé)
-FREE_CATEGORIES = {'nature_parks', 'shopping'}
-# Bảng giá cho các category có phí
-PRICE_OPTIONS = [30_000.0, 50_000.0, 100_000.0]
+# ── BẢNG GIÁ THEO LOẠI HÌNH (Pricing Tiers) ────────────────────────────────
+# Mỗi category có mảng giá riêng, phản ánh đặc thù du lịch Hà Nội.
+# Khi gán giá, hệ thống random.choice() từ mảng tương ứng (seed = PID).
+#
+# ┌──────────────────┬──────────────────────────────────┬───────────────────────────────────┐
+# │  Category        │  Mức giá (VND)                   │  Giải thích                       │
+# ├──────────────────┼──────────────────────────────────┼───────────────────────────────────┤
+# │  nature_parks    │  [0]                             │  Luôn miễn phí (Hồ Gươm, đi dạo) │
+# │  history_culture │  [30k, 50k, 100k]               │  Vé Nhà nước, giá niêm yết rẻ     │
+# │  entertainment   │  [100k, 200k, 500k]             │  Vé tư nhân (show, khu vui chơi)  │
+# │  food_drink      │  [50k, 150k, 300k, 800k]        │  Vỉa hè → Bình dân → Cafe → Fine │
+# │  shopping        │  [0, 100k, 300k, 500k]          │  0 = Window Shop, còn lại = spend │
+# └──────────────────┴──────────────────────────────────┴───────────────────────────────────┘
+CATEGORY_PRICE_TIERS: dict[str, list[float]] = {
+    'nature_parks':    [0.0],
+    'history_culture': [30_000.0, 50_000.0, 100_000.0],
+    'entertainment':   [100_000.0, 200_000.0, 500_000.0],
+    'food_drink':      [50_000.0, 150_000.0, 300_000.0, 800_000.0],
+    'shopping':        [0.0, 100_000.0, 300_000.0, 500_000.0],
+}
 
 
 # =============================================================================
@@ -70,11 +85,8 @@ def _load_from_disk() -> List[POI]:
                     rng = random.Random(pid)
                     cat = rng.choices(CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
 
-                    # Gán giá vé theo category
-                    if cat in FREE_CATEGORIES:
-                        price = 0.0
-                    else:
-                        price = rng.choice(PRICE_OPTIONS)
+                    # Gán giá vé theo category tier
+                    price = rng.choice(CATEGORY_PRICE_TIERS[cat])
 
                 poi = POI(
                     id=pid,
