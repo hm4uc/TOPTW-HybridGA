@@ -9,17 +9,71 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/optimize", response_model=OptimizationResponse)
+@router.post(
+    "/optimize",
+    response_model=OptimizationResponse,
+    summary="Tối ưu hóa lộ trình du lịch",
+    description=(
+        "Nhận sở thích người dùng (ngân sách, khung giờ, mức quan tâm 5 loại hình) "
+        "và trả về lộ trình tối ưu sử dụng thuật toán Di truyền Lai (HGA).\n\n"
+        "**Quy trình xử lý:**\n"
+        "1. Pydantic validation: kiểm tra budget, khung thời gian, interests → 422 nếu sai định dạng.\n"
+        "2. Business validation: kiểm tra start_node_id có tồn tại trong dataset → 400 nếu không hợp lệ.\n"
+        "3. Chạy HGA tối ưu lộ trình → 500 nếu lỗi hệ thống.\n"
+        "4. Kiểm tra kết quả: route rỗng hoặc chỉ có Depot → 404.\n\n"
+        "**Loại hình điểm tham quan (interests):**\n"
+        "- `history_culture`: Lịch sử - Văn hóa\n"
+        "- `nature_parks`: Thiên nhiên - Công viên\n"
+        "- `food_drink`: Ẩm thực\n"
+        "- `shopping`: Mua sắm\n"
+        "- `entertainment`: Giải trí\n\n"
+        "**Thang đánh giá (1-5 sao):**\n"
+        "- 1 sao = Không quan tâm (weight 0.1)\n"
+        "- 2 sao = Ít quan tâm (weight 0.5)\n"
+        "- 3 sao = Trung bình (weight 1.0)\n"
+        "- 4 sao = Quan tâm nhiều (weight 1.5)\n"
+        "- 5 sao = Rất quan tâm (weight 2.0)"
+    ),
+    responses={
+        200: {
+            "description": "Lộ trình tối ưu được tìm thấy thành công.",
+        },
+        400: {
+            "description": "Dữ liệu đầu vào không hợp lệ (VD: start_node_id không tồn tại).",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Điểm xuất phát (start_node_id=999) không tồn tại trong dataset. ID hợp lệ: 0 đến 100."
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Không tìm được lộ trình khả thi với ràng buộc đã cho.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Không thể ghé thăm bất kỳ điểm nào trong khung thời gian và ngân sách đã cho."
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Lỗi validation dữ liệu (thiếu trường, sai kiểu, giá trị ngoài phạm vi).",
+        },
+        500: {
+            "description": "Lỗi hệ thống trong quá trình chạy thuật toán.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Đã xảy ra lỗi trong quá trình tối ưu hóa lộ trình."
+                    }
+                }
+            },
+        },
+    },
+)
 async def optimize_itinerary(request: UserPreferences):
-    """
-    Endpoint tối ưu hóa lộ trình du lịch.
-
-    Validation layers:
-      1. Pydantic model validation (budget, thời gian, interests) → 422
-      2. Business logic validation (start_node_id, khung giờ) → 400
-      3. HGA execution → 500 nếu lỗi hệ thống
-      4. Result validation (route rỗng) → 404
-    """
     try:
         logger.info("Received optimization request with preferences: %s", request)
 

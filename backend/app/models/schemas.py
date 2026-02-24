@@ -24,12 +24,34 @@ VALID_CATEGORIES = {
 }
 
 
-# Input from user
+# Dữ liệu đầu vào từ người dùng
 class UserPreferences(BaseModel):
-    budget: float = Field(..., description="Ngân sách tối đa cho chuyến đi")
-    start_time: float = Field(8.0, description="Thời gian bắt đầu chuyến đi (giờ)")
-    end_time: float = Field(17.0, description="Thời gian kết thúc chuyến đi (giờ)")
-    start_node_id: int = Field(..., description="ID điểm xuất phát (depot)")
+    """Sở thích và ràng buộc của người dùng cho chuyến du lịch."""
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "budget": 500000,
+                    "start_time": 8.0,
+                    "end_time": 17.0,
+                    "start_node_id": 0,
+                    "interests": {
+                        "history_culture": 5,
+                        "nature_parks": 3,
+                        "food_drink": 4,
+                        "shopping": 1,
+                        "entertainment": 2
+                    }
+                }
+            ]
+        }
+    }
+
+    budget: float = Field(..., description="Ngân sách tối đa cho chuyến đi (VND)")
+    start_time: float = Field(8.0, description="Thời gian bắt đầu chuyến đi (giờ, VD: 8.0 = 8:00)")
+    end_time: float = Field(17.0, description="Thời gian kết thúc chuyến đi (giờ, VD: 17.0 = 17:00)")
+    start_node_id: int = Field(..., description="ID điểm xuất phát (depot), thường là 0")
     interests: Dict[str, int] = Field(
         ...,
         description=(
@@ -113,6 +135,24 @@ class UserPreferences(BaseModel):
 
         return self
 
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Chuyển đổi đơn vị: Giờ (user input) → Phút (Solomon time units)
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Solomon benchmark dùng đơn vị PHÚT cho tất cả time fields:
+    #    READY TIME, DUE DATE, SERVICE TIME, travel_time (Euclidean distance).
+    #  User nhập giờ (8.0 = 8AM, 17.0 = 5PM) → cần nhân 60 để khớp đơn vị.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @property
+    def start_time_minutes(self) -> float:
+        """Thời gian bắt đầu quy đổi sang phút (Solomon time units)."""
+        return self.start_time * 60.0
+
+    @property
+    def end_time_minutes(self) -> float:
+        """Thời gian kết thúc quy đổi sang phút (Solomon time units)."""
+        return self.end_time * 60.0
+
     @property
     def interest_weights(self) -> Dict[str, float]:
         """
@@ -140,22 +180,25 @@ class UserPreferences(BaseModel):
         scale = n / total
         return {cat: w * scale for cat, w in raw.items()}
 
-# Output
+# Dữ liệu đầu ra
 class ItineraryItem(BaseModel):
-    order: int = Field(..., description="Thứ tự trong lộ trình")
+    """Thông tin một điểm tham quan trong lộ trình."""
+    order: int = Field(..., description="Thứ tự trong lộ trình (bắt đầu từ 1)")
     id: int = Field(..., description="ID điểm tham quan")
     name: str = Field(..., description="Tên điểm tham quan")
-    category: Optional[str] = Field(None, description="Loại điểm tham quan")
-    arrival: Optional[str] = Field(None, description="Thời gian đến (HH:MM)")
-    wait: Optional[int] = Field(0, description="Thời gian chờ (phút)")
+    category: Optional[str] = Field(None, description="Loại điểm tham quan (history_culture, nature_parks, food_drink, shopping, entertainment, depot)")
+    arrival: Optional[str] = Field(None, description="Thời gian đến nơi (HH:MM)")
+    wait: Optional[int] = Field(0, description="Thời gian chờ mở cửa (phút)")
     start: Optional[str] = Field(None, description="Thời gian bắt đầu tham quan (HH:MM)")
     leave: Optional[str] = Field(None, description="Thời gian rời đi (HH:MM)")
-    cost: float = Field(..., description="Chi phí tham quan")
-    score: float = Field(..., description="Điểm đạt được tại điểm tham quan")
+    cost: float = Field(..., description="Chi phí tham quan tại điểm này (VND)")
+    score: float = Field(..., description="Điểm đạt được tại điểm tham quan (đã tính trọng số sở thích)")
+
 
 class OptimizationResponse(BaseModel):
-    total_score: float = Field(..., description="Tổng điểm đạt được")
-    total_cost: float = Field(..., description="Tổng chi phí")
+    """Kết quả tối ưu hóa lộ trình du lịch."""
+    total_score: float = Field(..., description="Tổng điểm đạt được của toàn bộ lộ trình")
+    total_cost: float = Field(..., description="Tổng chi phí chuyến đi (VND)")
     total_duration: float = Field(..., description="Tổng thời gian chuyến đi (giờ)")
-    route: List[ItineraryItem] = Field(..., description="Lộ trình chi tiết")
+    route: List[ItineraryItem] = Field(..., description="Danh sách các điểm tham quan theo thứ tự (bao gồm Depot đầu và cuối)")
     execution_time: float = Field(..., description="Thời gian chạy thuật toán (giây)")

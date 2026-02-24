@@ -85,18 +85,18 @@ def check_constraints(route: list[POI], user_prefs: UserPreferences) -> bool:
     Validate whether a COMPLETE route [Depot, ..., Depot] satisfies all
     TOPTW constraints:
       1. Time Windows  – arrive at each POI before its close_time.
-      2. Max Tour Time – return to depot before user_prefs.end_time (== depot close).
+      2. Max Tour Time – return to depot before end_time.
       3. Budget        – total price of visited POIs ≤ user_prefs.budget.
-    
-    Time is simulated forward from depot departure at user_prefs.start_time.
-    If a vehicle arrives before open_time, it *waits* (no penalty, but time passes).
+
+    ĐƠN VỊ: Mọi phép tính bên trong dùng PHÚT (Solomon time units).
+    User input (giờ) được chuyển qua start_time_minutes / end_time_minutes.
 
     Returns True if ALL constraints are satisfied, False otherwise.
     """
     if len(route) < 2:
         return False  # Must at least have [Depot, Depot]
 
-    current_time = user_prefs.start_time  # Solomon time unit
+    current_time = user_prefs.start_time_minutes  # Phút (VD: 8h → 480)
     total_cost = 0.0
 
     for i in range(len(route) - 1):
@@ -179,6 +179,8 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
 
     Fitness = Σ (base_score × interest_weight) − penalties.
 
+    ĐƠN VỊ: Mọi phép tính bên trong dùng PHÚT (Solomon time units).
+
     Penalties cover:
       • Time-window violation  – arrive after close_time       (×100.0)
       • Late return to depot   – return after end_time          (×100.0)
@@ -187,7 +189,7 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
         → Ép GA sắp xếp thứ tự POI sao cho đến nơi là vào chơi luôn,
           tránh bắt du khách chờ ngoài cửa.
     """
-    current_time = user_prefs.start_time
+    current_time = user_prefs.start_time_minutes  # Phút (VD: 8h → 480)
     total_score = 0.0
     total_cost = 0.0
     total_wait = 0.0
@@ -225,8 +227,8 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
     if total_cost > user_prefs.budget:
         penalty += (total_cost - user_prefs.budget) * PENALTY_BUDGET
 
-    # Late return penalty (check against depot close_time or user end_time)
-    end_time_limit = user_prefs.end_time
+    # Late return penalty (check against user end_time in minutes)
+    end_time_limit = user_prefs.end_time_minutes  # Phút (VD: 17h → 1020)
     if current_time > end_time_limit:
         penalty += (current_time - end_time_limit) * PENALTY_LATE_RETURN
 
