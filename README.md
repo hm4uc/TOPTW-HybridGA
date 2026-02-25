@@ -26,7 +26,7 @@ Hệ thống giải bài toán **Team Orienteering Problem with Time Windows (TO
 |---|---|
 | Ngôn ngữ | Python 3.13 |
 | Framework | FastAPI |
-| Thư viện | NumPy, Pandas, Pydantic, Uvicorn |
+| Thư viện | Pydantic, Uvicorn |
 | Thuật toán | Hybrid GA tự triển khai theo OOP |
 | Dữ liệu | Solomon Benchmark C101 (CSV) |
 
