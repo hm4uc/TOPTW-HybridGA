@@ -2,10 +2,22 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
-from app.models.schemas import OptimizationResponse, UserPreferences
-from app.services.algorithm.hga_engine import HybridGeneticAlgorithm
 
-app = FastAPI(title="TOPTW Hybrid GA API")
+app = FastAPI(
+    title="TOPTW Hybrid GA API",
+    description=(
+        "API tối ưu hóa lộ trình du lịch cá nhân hóa dựa trên thuật toán Di truyền Lai (Hybrid GA), "
+        "giải bài toán Team Orienteering Problem with Time Windows (TOPTW). "
+        "Hệ thống tối ưu lộ trình theo sở thích, ngân sách và ràng buộc thời gian của người dùng."
+    ),
+    version="1.0.0",
+    contact={
+        "name": "Hoàng Minh Đức",
+    },
+    license_info={
+        "name": "MIT License",
+    },
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,15 +26,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(router, prefix="/api")
 
-@app.get("/")
+app.include_router(router, prefix="/api", tags=["Optimization"])
+
+
+@app.get(
+    "/",
+    summary="Health Check",
+    description="Kiểm tra trạng thái hoạt động của server.",
+    tags=["System"],
+)
 def root():
     return {"status": "ok", "message": "Server is running..."}
-
-@app.post("/optimize", response_model=OptimizationResponse)
-async def optimize_itinerary(request: UserPreferences):
-    solver = HybridGeneticAlgorithm(request)
-
-    result = solver.run()
-    return result
