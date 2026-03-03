@@ -1,3 +1,11 @@
+"""
+Data Loader — Đọc Solomon benchmark instances.
+
+Hỗ trợ 2 chế độ:
+  1. load_solomon_instance(name)  → Đọc từ extended CSV (có CATEGORY + PRICE sẵn)
+  2. load_solomon_c101()          → Legacy API, tương thích ngược
+"""
+
 import os
 import csv
 import copy
@@ -6,7 +14,6 @@ from typing import Optional, List
 from app.models.domain import POI
 
 # --- DANH SÁCH CATEGORY CHUẨN ---
-# Dùng bộ này cho toàn bộ hệ thống
 CATEGORIES = [
     'history_culture',  # Lăng Bác, Văn Miếu, Hoàng Thành, Chùa Một Cột, ...
     'nature_parks',     # Công viên Thống Nhất, Hồ Gươm, Vườn hoa Lý Thái Tổ, ...
@@ -16,22 +23,9 @@ CATEGORIES = [
 ]
 
 # Tỷ lệ xuất hiện giả lập (Mô phỏng đặc thù du lịch Hà Nội)
-# history_culture: 35%, nature: 15%, food: 25%, shopping: 15%, entertainment: 10%
 CATEGORY_WEIGHTS = [0.35, 0.15, 0.25, 0.15, 0.10]
 
 # ── BẢNG GIÁ THEO LOẠI HÌNH (Pricing Tiers) ────────────────────────────────
-# Mỗi category có mảng giá riêng, phản ánh đặc thù du lịch Hà Nội.
-# Khi gán giá, hệ thống random.choice() từ mảng tương ứng (seed = PID).
-#
-# ┌──────────────────┬──────────────────────────────────┬───────────────────────────────────┐
-# │  Category        │  Mức giá (VND)                   │  Giải thích                       │
-# ├──────────────────┼──────────────────────────────────┼───────────────────────────────────┤
-# │  nature_parks    │  [0]                             │  Luôn miễn phí (Hồ Gươm, đi dạo) │
-# │  history_culture │  [30k, 50k, 100k]               │  Vé Nhà nước, giá niêm yết rẻ     │
-# │  entertainment   │  [100k, 200k, 500k]             │  Vé tư nhân (show, khu vui chơi)  │
-# │  food_drink      │  [50k, 150k, 300k, 800k]        │  Vỉa hè → Bình dân → Cafe → Fine │
-# │  shopping        │  [0, 100k, 300k, 500k]          │  0 = Window Shop, còn lại = spend │
-# └──────────────────┴──────────────────────────────────┴───────────────────────────────────┘
 CATEGORY_PRICE_TIERS: dict[str, list[float]] = {
     'nature_parks':    [0.0],
     'history_culture': [30_000.0, 50_000.0, 100_000.0],
@@ -42,51 +36,44 @@ CATEGORY_PRICE_TIERS: dict[str, list[float]] = {
 
 
 # =============================================================================
-#  IN-MEMORY CACHE  (Singleton Pattern)
+#  IN-MEMORY CACHE  (Singleton Pattern — per instance)
 # =============================================================================
-#
-#  Đọc file CSV từ disk đúng 1 lần duy nhất → lưu vào RAM.
-#  Các request sau chỉ lấy deep copy từ bộ nhớ, tránh disk I/O lặp lại.
-#
-#  Tại sao deep copy mà không phải shallow copy?
-#    → GA engine MUTATE các object POI trong quá trình chạy (route manipulation).
-#    → Nếu dùng shallow copy, nhiều request đồng thời sẽ chia sẻ cùng
-#      object POI → race condition, data corruption.
-#    → Deep copy đảm bảo mỗi request có bản sao riêng, an toàn hoàn toàn.
-#
-# =============================================================================
-
-_POI_CACHE: Optional[List[POI]] = None
+_INSTANCE_CACHE: dict[str, List[POI]] = {}
 
 
-def _load_from_disk() -> List[POI]:
+def _parse_solomon_csv(file_path: str, use_extended: bool = False) -> List[POI]:
     """
-    Internal: Đọc file C101.csv từ disk và parse thành list[POI].
-    Chỉ được gọi 1 lần duy nhất bởi load_solomon_c101().
-    """
-    file_path = os.path.join(os.getcwd(), 'data', 'solomon_instances', 'C101.csv')
+    Internal: Đọc file Solomon CSV và parse thành list[POI].
 
+    Parameters
+    ----------
+    file_path : str
+        Đường dẫn đến file CSV.
+    use_extended : bool
+        True nếu file có cột CATEGORY + PRICE sẵn (extended CSV).
+        False nếu cần random gán (legacy).
+    """
     pois = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 cust_no = int(row.get('CUST NO.', 0))
+                pid = cust_no - 1  # Remap: CUST NO. 1 → Depot (id=0)
 
-                # --- Remap: CUST NO. 1 → Depot (id=0), others → id = CUST NO. - 1 ---
-                pid = cust_no - 1
-
-                # --- LOGIC GÁN CATEGORY + PRICE ---
-                if pid == 0:
-                    cat = "depot"
-                    price = 0.0
+                if use_extended:
+                    # Extended CSV — đọc CATEGORY + PRICE trực tiếp
+                    cat = row.get('CATEGORY', 'depot')
+                    price = float(row.get('PRICE', 0.0))
                 else:
-                    # Gán category + price cố định theo PID (seed đảm bảo tái lập)
-                    rng = random.Random(pid)
-                    cat = rng.choices(CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
-
-                    # Gán giá vé theo category tier
-                    price = rng.choice(CATEGORY_PRICE_TIERS[cat])
+                    # Legacy — random gán (seed = pid cho reproducibility)
+                    if pid == 0:
+                        cat = "depot"
+                        price = 0.0
+                    else:
+                        rng = random.Random(pid)
+                        cat = rng.choices(CATEGORIES, weights=CATEGORY_WEIGHTS, k=1)[0]
+                        price = rng.choice(CATEGORY_PRICE_TIERS[cat])
 
                 poi = POI(
                     id=pid,
@@ -97,34 +84,65 @@ def _load_from_disk() -> List[POI]:
                     close_time=float(row.get('DUE DATE', 0)),
                     duration=float(row.get('SERVICE TIME', 0)),
                     category=cat,
-                    price=price
+                    price=price,
                 )
                 pois.append(poi)
     except Exception as e:
-        print(f"[DataLoader] Error reading Solomon data: {e}")
+        print(f"[DataLoader] Error reading file {file_path}: {e}")
         return []
 
-    print(f"[DataLoader] Loaded {len(pois)} POIs from C101.csv "
+    print(f"[DataLoader] Loaded {len(pois)} POIs from {os.path.basename(file_path)} "
           f"(Depot id=0 at ({pois[0].x}, {pois[0].y}))")
     return pois
 
 
-def load_solomon_c101() -> list[POI]:
+def load_solomon_instance(instance_name: str = "C101") -> List[POI]:
     """
-    Load Solomon C101 benchmark dataset — CÓ CACHE.
+    Load Solomon benchmark instance từ extended CSV — CÓ CACHE.
 
-    Lần gọi đầu tiên: đọc từ disk → lưu vào _POI_CACHE.
-    Các lần gọi sau : trả deep copy từ RAM (không đọc disk).
+    Extended CSV đã có sẵn CATEGORY + PRICE cố định (reproducible).
+    Cache theo tên instance.
 
-    Returns a list of POI objects. POI with id=0 is always the Depot.
+    Parameters
+    ----------
+    instance_name : str
+        Tên instance: "C101", "C201", "R101", "R201", "RC101", "RC201"
+
+    Returns
+    -------
+    list[POI]
+        Deep copy of POI list. POI with id=0 is always the Depot.
     """
-    global _POI_CACHE
+    global _INSTANCE_CACHE
 
-    if _POI_CACHE is None:
-        _POI_CACHE = _load_from_disk()
-        print(f"[DataLoader] Cache initialized: {len(_POI_CACHE)} POIs in RAM")
+    if instance_name not in _INSTANCE_CACHE:
+        # Tìm file extended CSV
+        file_path = os.path.join(
+            os.getcwd(), 'data', 'solomon_instances',
+            'extended', f'{instance_name}_extended.csv'
+        )
+
+        if not os.path.exists(file_path):
+            # Fallback: thử từ thư mục gốc (legacy format)
+            file_path = os.path.join(
+                os.getcwd(), 'data', 'solomon_instances', f'{instance_name}.csv'
+            )
+            _INSTANCE_CACHE[instance_name] = _parse_solomon_csv(file_path, use_extended=False)
+        else:
+            _INSTANCE_CACHE[instance_name] = _parse_solomon_csv(file_path, use_extended=True)
+
+        print(f"[DataLoader] Cache initialized for {instance_name}: "
+              f"{len(_INSTANCE_CACHE[instance_name])} POIs")
     else:
-        print(f"[DataLoader] Cache HIT — returning {len(_POI_CACHE)} POIs from RAM")
+        print(f"[DataLoader] Cache HIT — {instance_name}: "
+              f"{len(_INSTANCE_CACHE[instance_name])} POIs from RAM")
 
-    # Deep copy để mỗi request có bản sao riêng, tránh race condition
-    return copy.deepcopy(_POI_CACHE)
+    return copy.deepcopy(_INSTANCE_CACHE[instance_name])
+
+
+def load_solomon_c101() -> List[POI]:
+    """
+    Legacy API — tương thích ngược.
+    Load Solomon C101, sử dụng extended CSV nếu có.
+    """
+    return load_solomon_instance("C101")

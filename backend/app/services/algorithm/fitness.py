@@ -173,7 +173,8 @@ PENALTY_BUDGET        =   0.5   # Vượt ngân sách      (ràng buộc mềm)
 PENALTY_WAIT          =   0.2   # Thời gian chờ       (chất lượng trải nghiệm)
 
 
-def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
+def calculate_fitness(ind, user_prefs: UserPreferences,
+                      wait_penalty_weight: float = PENALTY_WAIT) -> float:
     """
     Evaluate fitness of an Individual.
 
@@ -181,11 +182,21 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
 
     ĐƠN VỊ: Mọi phép tính bên trong dùng PHÚT (Solomon time units).
 
+    Parameters
+    ----------
+    ind : Individual
+        Cá thể cần đánh giá.
+    user_prefs : UserPreferences
+        Sở thích và ràng buộc người dùng.
+    wait_penalty_weight : float
+        Hệ số phạt thời gian chờ (mặc định 0.2).
+        Đặt = 0.0 để tắt penalty chờ (ablation study).
+
     Penalties cover:
       • Time-window violation  – arrive after close_time       (×100.0)
       • Late return to depot   – return after end_time          (×100.0)
       • Budget overrun         – total price > budget           (× 0.5)
-      • Waiting time           – arrive before open_time        (× 0.2)
+      • Waiting time           – arrive before open_time        (× wait_penalty_weight)
         → Ép GA sắp xếp thứ tự POI sao cho đến nơi là vào chơi luôn,
           tránh bắt du khách chờ ngoài cửa.
     """
@@ -212,7 +223,7 @@ def calculate_fitness(ind, user_prefs: UserPreferences) -> float:
         if arrival < next_p.open_time:
             wait = next_p.open_time - arrival
             total_wait += wait
-            penalty += wait * PENALTY_WAIT          # ★ Phạt chờ
+            penalty += wait * wait_penalty_weight    # ★ Phạt chờ (configurable)
             arrival = next_p.open_time              # Vẫn phải chờ đến giờ mở
 
         if arrival > next_p.close_time:

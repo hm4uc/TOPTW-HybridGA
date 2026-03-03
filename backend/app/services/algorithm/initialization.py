@@ -20,9 +20,9 @@ from app.services.algorithm.fitness import (
 
 
 # ─── Constants ───────────────────────────────────────────────────────────────
-POPULATION_SIZE = 50
-HEURISTIC_COUNT = 40   # 80%  → Randomized Insertion Heuristic
-RANDOM_COUNT    = 10   # 20%  → Pure Random
+POPULATION_SIZE = 100
+HEURISTIC_COUNT = 80   # 80%  → Randomized Insertion Heuristic
+RANDOM_COUNT    = 20   # 20%  → Pure Random
 RCL_SIZE        = 3    # Top-k candidates in Restricted Candidate List
 
 
@@ -136,11 +136,17 @@ def _create_random_individual(
 def initialize_population(
     pois: List[POI],
     user_prefs: UserPreferences,
+    use_heuristic_init: bool = True,
 ) -> List[Individual]:
     """
-    Generate the initial population of 50 individuals:
+    Generate the initial population of 50 individuals.
+
+    Chế độ mặc định (use_heuristic_init=True):
       • 40 via Randomized Insertion Heuristic  (high quality + diversity)
       • 10 via Pure Random                     (exploration / diversity)
+
+    Chế độ ablation (use_heuristic_init=False):
+      • 50 via Pure Random  (để đánh giá đóng góp của heuristic init)
 
     Every route is guaranteed to:
       ✓ Start and end at the Depot (POI id == 0)
@@ -152,6 +158,9 @@ def initialize_population(
         All available Points of Interest (including the depot at index 0).
     user_prefs : UserPreferences
         User constraints (budget, time window, interests).
+    use_heuristic_init : bool
+        True → 80% Heuristic + 20% Random (mặc định).
+        False → 100% Random (ablation study).
 
     Returns
     -------
@@ -164,13 +173,20 @@ def initialize_population(
 
     population: List[Individual] = []
 
+    if use_heuristic_init:
+        heuristic_count = HEURISTIC_COUNT
+        random_count = RANDOM_COUNT
+    else:
+        heuristic_count = 0
+        random_count = POPULATION_SIZE
+
     # --- Strategy 1: Heuristic individuals ---
-    for i in range(HEURISTIC_COUNT):
+    for i in range(heuristic_count):
         ind = _create_heuristic_individual(pois, depot, user_prefs)
         population.append(ind)
 
     # --- Strategy 2: Random individuals ---
-    for i in range(RANDOM_COUNT):
+    for i in range(random_count):
         ind = _create_random_individual(pois, depot, user_prefs)
         population.append(ind)
 
@@ -179,12 +195,17 @@ def initialize_population(
     )
 
     # --- Summary log ---
-    heuristic_lens = [len(ind.route) for ind in population[:HEURISTIC_COUNT]]
-    random_lens = [len(ind.route) for ind in population[HEURISTIC_COUNT:]]
-    print(f"[Init] Population created: {POPULATION_SIZE} individuals")
-    print(f"       Heuristic ({HEURISTIC_COUNT}): avg route length = "
-          f"{sum(heuristic_lens)/len(heuristic_lens):.1f}")
-    print(f"       Random    ({RANDOM_COUNT}):  avg route length = "
-          f"{sum(random_lens)/len(random_lens):.1f}")
+    if use_heuristic_init and heuristic_count > 0:
+        heuristic_lens = [len(ind.route) for ind in population[:heuristic_count]]
+        random_lens = [len(ind.route) for ind in population[heuristic_count:]]
+        print(f"[Init] Population created: {POPULATION_SIZE} individuals")
+        print(f"       Heuristic ({heuristic_count}): avg route length = "
+              f"{sum(heuristic_lens)/len(heuristic_lens):.1f}")
+        print(f"       Random    ({random_count}):  avg route length = "
+              f"{sum(random_lens)/len(random_lens):.1f}")
+    else:
+        all_lens = [len(ind.route) for ind in population]
+        print(f"[Init] Population created: {POPULATION_SIZE} individuals (100% Random)")
+        print(f"       Avg route length = {sum(all_lens)/len(all_lens):.1f}")
 
     return population

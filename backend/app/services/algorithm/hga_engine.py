@@ -14,6 +14,9 @@ Luồng chính mỗi thế hệ:
 Nguyên tắc "Depot-Safe":
   Mọi toán tử GA đều CHỈ thao tác trên "interior" = route[1:-1].
   Depot được gắn lại sau khi xử lý xong.
+
+★ ABLATION FLAGS ★
+  Hỗ trợ tắt/bật từng thành phần để đánh giá đóng góp (Ablation Study).
 """
 
 import random
@@ -22,7 +25,7 @@ from typing import Optional, List
 
 from app.models.domain import POI, Individual
 from app.models.schemas import UserPreferences, OptimizationResponse, ItineraryItem
-from app.services.data_loader import load_solomon_c101
+from app.services.data_loader import load_solomon_instance
 from app.services.algorithm.initialization import (
     initialize_population,
     POPULATION_SIZE,
@@ -33,6 +36,7 @@ from app.services.algorithm.fitness import (
     check_constraints,
     get_travel_time,
     build_distance_matrix,
+    PENALTY_WAIT,
 )
 
 
@@ -48,32 +52,79 @@ def _format_time(minutes: float) -> str:
 
 
 class HybridGeneticAlgorithm:
-    def __init__(self, user_prefs: UserPreferences):
+    def __init__(
+        self,
+        user_prefs: UserPreferences,
+        pois: Optional[List[POI]] = None,
+        instance_name: str = "C101",
+        # ── Ablation Flags ──────────────────────────────────────────
+        use_smart_repair: bool = True,        # False → Simple Repair (xóa cuối)
+        use_insertion_mutation: bool = True,   # False → chỉ 2-opt + Swap
+        use_wait_penalty: bool = True,         # False → PENALTY_WAIT = 0
+        use_heuristic_init: bool = True,       # False → 100% Random Init
+        use_diversity_check: bool = True,      # False → không check duplicate
+        # ── Tunable Parameters ──────────────────────────────────────
+        population_size: int = POPULATION_SIZE,
+        mutation_rate: float = 0.7,
+        generations: int = 200,
+        stagnation_limit: int = 25,
+        tournament_k: int = 3,
+    ):
         self.user_prefs = user_prefs
-        self.pois = load_solomon_c101()
 
-        # ── Pre-compute Distance Matrix (O(1) lookups) ────────────────────
+        # ── Load dữ liệu ────────────────────────────────────────────
+        if pois is not None:
+            self.pois = pois
+        else:
+            self.pois = load_solomon_instance(instance_name)
+
+        # ── Pre-compute Distance Matrix ──────────────────────────────
         build_distance_matrix(self.pois)
         self.depot: Optional[POI] = next(
             (p for p in self.pois if p.id == 0), None
         )
         self.poi_map = {p.id: p for p in self.pois}
-        self.population_size = POPULATION_SIZE   # 50
-        self.mutation_rate   = 0.3
-        self.generations     = 200               # Max cap (early stopping sẽ bảo vệ)
-        self.stagnation_limit = 15               # Dừng nếu 15 gen không cải thiện
-        self.improvement_threshold = 1e-4        # Min delta để tính là "cải thiện"
-        self.elitism_rate    = 2
-        self.tournament_k    = 3
+
+        # ── Ablation Flags ───────────────────────────────────────────
+        self.use_smart_repair = use_smart_repair
+        self.use_insertion_mutation = use_insertion_mutation
+        self.use_wait_penalty = use_wait_penalty
+        self.use_heuristic_init = use_heuristic_init
+        self.use_diversity_check = use_diversity_check
+
+        # ── GA Parameters ────────────────────────────────────────────
+        self.population_size = population_size
+        self.mutation_rate = mutation_rate
+        self.generations = generations
+        self.stagnation_limit = stagnation_limit
+        self.improvement_threshold = 1e-4
+        self.elitism_rate = 5
+        self.tournament_k = tournament_k
         self.population: list[Individual] = []
+
+        # ── Wait penalty weight (configurable for ablation) ──────────
+        self.wait_penalty_weight = PENALTY_WAIT if use_wait_penalty else 0.0
+
+        # ── Results Tracking ─────────────────────────────────────────
+        self.convergence_log: list[dict] = []
+        self.actual_gens: int = 0
+        self.best_individual: Optional[Individual] = None
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Step 1: Population Initialization
     # ══════════════════════════════════════════════════════════════════════════
     def initialize_population(self) -> list[Individual]:
-        self.population = initialize_population(self.pois, self.user_prefs)
-        for ind in self.population:
-            calculate_fitness(ind, self.user_prefs)
+        self.population = initialize_population(
+            self.pois, self.user_prefs,
+            use_heuristic_init=self.use_heuristic_init,
+        )
+        # ★ Cải tiến: Repair + Greedy Refill cho MỖI cá thể khởi tạo
+        #   → Giảm khoảng cách Best vs Avg fitness ngay từ Gen 1.
+        for i, ind in enumerate(self.population):
+            ind = self._repair(ind)
+            ind = self._greedy_refill(ind)
+            calculate_fitness(ind, self.user_prefs, self.wait_penalty_weight)
+            self.population[i] = ind
         self.population.sort(key=lambda ind: ind.fitness, reverse=True)
 
         print("[HGA] Population initialized and evaluated.")
@@ -85,7 +136,7 @@ class HybridGeneticAlgorithm:
     #  Step 2: Fitness Evaluation
     # ══════════════════════════════════════════════════════════════════════════
     def evaluate_fitness(self, individual: Individual) -> float:
-        return calculate_fitness(individual, self.user_prefs)
+        return calculate_fitness(individual, self.user_prefs, self.wait_penalty_weight)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Step 3: Parent Selection — Tournament
@@ -140,14 +191,18 @@ class HybridGeneticAlgorithm:
     # ══════════════════════════════════════════════════════════════════════════
     #  Step 5: Mutation — 2-opt / Swap / Insertion  (Depot-Safe)
     # ══════════════════════════════════════════════════════════════════════════
-
     def mutate(self, individual: Individual) -> Individual:
         """
-        Áp dụng 1 trong 3 kiểu đột biến:
+        Áp dụng đột biến (Depot-Safe).
+
+        Chế độ mặc định (use_insertion_mutation=True):
           • 2-opt     (30%) : đảo ngược đoạn con → giảm quãng đường.
           • Swap      (30%) : hoán đổi 2 POI → thay đổi thứ tự.
-          • Insertion (40%) : tìm POI mới chưa đi, chèn vào vị trí tốt nhất
-                              → TĂNG ĐIỂM (biến thời gian dư thành điểm thưởng).
+          • Insertion (40%) : tìm POI mới chưa đi, chèn vào vị trí tốt nhất.
+
+        Chế độ ablation (use_insertion_mutation=False):
+          • 2-opt     (50%)
+          • Swap      (50%)
         """
         if random.random() > self.mutation_rate:
             return individual
@@ -155,26 +210,34 @@ class HybridGeneticAlgorithm:
         interior = list(individual.route[1:-1])
 
         if len(interior) < 2:
-            individual = self._insertion_mutation(individual)
+            if self.use_insertion_mutation:
+                individual = self._insertion_mutation(individual)
             return individual
 
         roll = random.random()
 
-        if roll < 0.30:
-            # ── 2-opt ────────────────────────────────────────────────────────
-            i, j = sorted(random.sample(range(len(interior)), 2))
-            interior[i:j + 1] = interior[i:j + 1][::-1]
-            individual.route = [self.depot] + interior + [self.depot]
-
-        elif roll < 0.60:
-            # ── Swap ─────────────────────────────────────────────────────────
-            i, j = random.sample(range(len(interior)), 2)
-            interior[i], interior[j] = interior[j], interior[i]
-            individual.route = [self.depot] + interior + [self.depot]
-
+        if self.use_insertion_mutation:
+            # ── Chế độ đầy đủ: 2-opt(30%) / Swap(30%) / Insertion(40%) ──
+            if roll < 0.30:
+                i, j = sorted(random.sample(range(len(interior)), 2))
+                interior[i:j + 1] = interior[i:j + 1][::-1]
+                individual.route = [self.depot] + interior + [self.depot]
+            elif roll < 0.60:
+                i, j = random.sample(range(len(interior)), 2)
+                interior[i], interior[j] = interior[j], interior[i]
+                individual.route = [self.depot] + interior + [self.depot]
+            else:
+                individual = self._insertion_mutation(individual)
         else:
-            # ── Insertion Mutation ────────────────────────────────────────────
-            individual = self._insertion_mutation(individual)
+            # ── Ablation: chỉ 2-opt(50%) + Swap(50%) ────────────────────
+            if roll < 0.50:
+                i, j = sorted(random.sample(range(len(interior)), 2))
+                interior[i:j + 1] = interior[i:j + 1][::-1]
+                individual.route = [self.depot] + interior + [self.depot]
+            else:
+                i, j = random.sample(range(len(interior)), 2)
+                interior[i], interior[j] = interior[j], interior[i]
+                individual.route = [self.depot] + interior + [self.depot]
 
         return individual
 
@@ -183,7 +246,7 @@ class HybridGeneticAlgorithm:
         ★ INSERTION MUTATION — Toán tử cốt lõi để phá Hội tụ sớm ★
 
         Tìm POI chưa ghé thăm, chèn vào vị trí tốn ít thời gian nhất.
-        Lấy tối đa 10 ứng viên ngẫu nhiên để giữ hiệu năng.
+        Duyệt TOÀN BỘ POI chưa thăm để không bỏ sót ứng viên tốt.
         """
         route = list(individual.route)
         visited_ids = {p.id for p in route}
@@ -192,16 +255,129 @@ class HybridGeneticAlgorithm:
         if not unvisited:
             return individual
 
-        random.shuffle(unvisited)
-        candidates = unvisited[:10]
-
+        # Sắp xếp theo score cá nhân hóa, xen kẽ random để giữ đa dạng
         weights = self.user_prefs.interest_weights
-        candidates.sort(
+        random.shuffle(unvisited)
+        unvisited.sort(
             key=lambda p: p.base_score * weights.get(p.category, 0.0),
             reverse=True,
         )
 
-        for candidate in candidates:
+        for candidate in unvisited:
+            best_pos = -1
+            best_cost_increase = float('inf')
+
+            for pos in range(1, len(route)):
+                prev_poi = route[pos - 1]
+                next_poi = route[pos]
+
+                old_travel = get_travel_time(prev_poi, next_poi)
+                new_travel = (
+                    get_travel_time(prev_poi, candidate)
+                    + candidate.duration
+                    + get_travel_time(candidate, next_poi)
+                )
+                cost_increase = new_travel - old_travel
+
+                if cost_increase < best_cost_increase:
+                    best_cost_increase = cost_increase
+                    best_pos = pos
+
+            if best_pos > 0:
+                test_route = list(route)
+                test_route.insert(best_pos, candidate)
+                if check_constraints(test_route, self.user_prefs):
+                    route = test_route
+
+        individual.route = route
+        return individual
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Step 6: Repair (Smart or Simple)
+    # ══════════════════════════════════════════════════════════════════════════
+    def _repair(self, individual: Individual) -> Individual:
+        """
+        Sửa chữa cá thể vi phạm ràng buộc.
+
+        Chế độ mặc định (use_smart_repair=True):
+          ★ SMART REPAIR — xóa POI có tỷ lệ Score/Time kém nhất.
+
+        Chế độ ablation (use_smart_repair=False):
+          Simple Repair — luôn xóa POI áp chót.
+        """
+        route = individual.route
+
+        while not check_constraints(route, self.user_prefs) and len(route) > 2:
+            if self.use_smart_repair:
+                # ── Smart Repair: tìm POI kém nhất ──────────────────────
+                worst_idx = -1
+                worst_value = float('inf')
+                weights = self.user_prefs.interest_weights
+
+                for i in range(1, len(route) - 1):
+                    poi = route[i]
+                    score_value = poi.base_score * weights.get(poi.category, 0.0)
+
+                    prev_poi = route[i - 1]
+                    next_poi = route[i + 1]
+                    time_cost = (
+                        get_travel_time(prev_poi, poi)
+                        + poi.duration
+                        + get_travel_time(poi, next_poi)
+                        - get_travel_time(prev_poi, next_poi)
+                    )
+
+                    if time_cost > 0:
+                        ratio = score_value / time_cost
+                    else:
+                        ratio = float('inf')
+
+                    if ratio < worst_value:
+                        worst_value = ratio
+                        worst_idx = i
+
+                if worst_idx > 0:
+                    route.pop(worst_idx)
+                else:
+                    route.pop(-2)
+            else:
+                # ── Simple Repair: luôn xóa POI áp chót ─────────────────
+                route.pop(-2)
+
+        individual.route = route
+        return individual
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Step 6b: Greedy Refill — Lấp đầy route sau Repair
+    # ══════════════════════════════════════════════════════════════════════════
+    def _greedy_refill(self, individual: Individual) -> Individual:
+        """
+        ★ GREEDY REFILL — Chèn thêm POI vào route sau khi Repair xóa bớt ★
+
+        Sau khi Repair cắt POI vi phạm, route thường rất ngắn (1-2 POI).
+        Bước này tìm POI chưa ghé, thử chèn vào vị trí tốt nhất (tốn ít
+        thời gian nhất), miễn là vẫn thỏa constraints.
+
+        Ưu tiên POI theo: score × interest_weight (cao → thêm trước).
+        Duyệt TOÀN BỘ POI chưa thăm (100 POI ~ O(1ms)).
+        """
+        route = list(individual.route)
+        visited_ids = {p.id for p in route}
+        unvisited = [p for p in self.pois if p.id not in visited_ids and p.id != 0]
+
+        if not unvisited:
+            individual.route = route
+            return individual
+
+        # Sắp xếp theo score cá nhân hóa (descending)
+        weights = self.user_prefs.interest_weights
+        unvisited.sort(
+            key=lambda p: p.base_score * weights.get(p.category, 0.0),
+            reverse=True,
+        )
+
+        for candidate in unvisited:
             best_pos = -1
             best_cost_increase = float('inf')
 
@@ -231,75 +407,12 @@ class HybridGeneticAlgorithm:
         return individual
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Step 6: Smart Repair (Bước 3 — Xóa POI kém nhất, không phải cuối)
-    # ══════════════════════════════════════════════════════════════════════════
-    def _repair(self, individual: Individual) -> Individual:
-        """
-        ★ SMART REPAIR — Xóa POI có tỷ lệ Score/Time kém nhất ★
-
-        Thay vì luôn xóa POI áp chót (có thể là POI rất tốt),
-        chúng ta tìm POI có "giá trị" thấp nhất trong interior
-        và xóa nó. Giá trị = (base_score × interest_weight) / added_time.
-
-        Nếu POI tốn nhiều thời gian nhưng chỉ mang lại ít điểm → xóa trước.
-
-        Vẫn đảm bảo Depot-Safe: chỉ xóa trong interior (route[1:-1]).
-        """
-        route = individual.route
-
-        while not check_constraints(route, self.user_prefs) and len(route) > 2:
-            # Tìm POI kém nhất trong interior (index 1 đến len-2)
-            worst_idx = -1
-            worst_value = float('inf')
-            weights = self.user_prefs.interest_weights
-
-            for i in range(1, len(route) - 1):
-                poi = route[i]
-
-                # Tính điểm thực tế của POI này
-                score_value = poi.base_score * weights.get(poi.category, 0.0)
-
-                # Tính thời gian POI này "ngốn" khỏi lộ trình
-                # = travel(prev → poi) + poi.duration + travel(poi → next) - travel(prev → next)
-                prev_poi = route[i - 1]
-                next_poi = route[i + 1]
-                time_cost = (
-                    get_travel_time(prev_poi, poi)
-                    + poi.duration
-                    + get_travel_time(poi, next_poi)
-                    - get_travel_time(prev_poi, next_poi)
-                )
-
-                # Tỷ lệ giá trị: score mang lại / thời gian tốn
-                # POI có ratio thấp nhất = kém nhất → ưu tiên xóa
-                if time_cost > 0:
-                    ratio = score_value / time_cost
-                else:
-                    ratio = float('inf')  # Không tốn thời gian → giữ lại
-
-                if ratio < worst_value:
-                    worst_value = ratio
-                    worst_idx = i
-
-            if worst_idx > 0:
-                route.pop(worst_idx)
-            else:
-                # Fallback: xóa áp chót
-                route.pop(-2)
-
-        individual.route = route
-        return individual
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  Diversity Check (Bước 2 — Chống đồng huyết)
+    #  Diversity Check (Chống đồng huyết)
     # ══════════════════════════════════════════════════════════════════════════
     def _is_duplicate(self, child: Individual, population: list[Individual]) -> bool:
         """
         Kiểm tra cá thể `child` có trùng lặp với bất kỳ cá thể nào
         trong `population` hay không.
-
-        Hai cá thể được coi là "trùng" nếu tập hợp POI ID giống hệt nhau
-        (không cần cùng thứ tự — vì thứ tự có thể khác nhưng bản chất giống).
         """
         child_ids = frozenset(p.id for p in child.route[1:-1])
         for ind in population:
@@ -310,11 +423,18 @@ class HybridGeneticAlgorithm:
 
     def _create_diverse_individual(self) -> Individual:
         """
-        Tạo 1 cá thể Random hoàn toàn mới khi phát hiện bản sao.
-        Đảm bảo quần thể luôn có sự đa dạng.
+        Tạo 1 cá thể mới khi phát hiện bản sao.
+
+        ★ Cải tiến: Thay vì random thuần (fitness rất thấp), ta:
+          1. Tạo random cơ bản
+          2. Repair nếu vi phạm
+          3. Greedy Refill để lấp đầy route → chất lượng cao hơn nhiều
+        → Giảm khoảng cách Best vs Avg fitness đáng kể.
         """
         ind = _create_random_individual(self.pois, self.depot, self.user_prefs)
-        calculate_fitness(ind, self.user_prefs)
+        ind = self._repair(ind)
+        ind = self._greedy_refill(ind)
+        calculate_fitness(ind, self.user_prefs, self.wait_penalty_weight)
         return ind
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -374,7 +494,7 @@ class HybridGeneticAlgorithm:
             # Chờ nếu đến sớm hơn giờ mở cửa
             wait_minutes = 0
             if arrival_raw < poi.open_time:
-                wait_minutes = int(round(poi.open_time - arrival_raw))  # Đã là phút
+                wait_minutes = int(round(poi.open_time - arrival_raw))
                 arrival_effective = poi.open_time
             else:
                 arrival_effective = arrival_raw
@@ -434,7 +554,7 @@ class HybridGeneticAlgorithm:
         )
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  Main Loop — Early Stopping + Enhanced Logging
+    #  Main Loop — Early Stopping + Convergence Logging
     # ══════════════════════════════════════════════════════════════════════════
     def run(self) -> OptimizationResponse:
         """
@@ -443,13 +563,12 @@ class HybridGeneticAlgorithm:
         ★ EARLY STOPPING ★
           Nếu best fitness không cải thiện (>= threshold) trong
           `stagnation_limit` thế hệ liên tiếp → dừng sớm.
-          Giúp API phản hồi nhanh hơn khi thuật toán đã hội tụ.
 
-        Log mỗi thế hệ:
-          • Best Fitness / Average Fitness
-          • Unique Routes (diversity)
-          • Wait Time (best individual)
-          • Stagnation counter (bao nhiêu gen chưa cải thiện)
+        ★ CONVERGENCE LOGGING ★
+          Lưu metrics mỗi thế hệ vào self.convergence_log để vẽ đồ thị.
+
+        ★ ABLATION FLAGS ★
+          Các toán tử có thể tắt/bật qua flags trong __init__.
         """
         start_time = time.perf_counter()
 
@@ -461,25 +580,38 @@ class HybridGeneticAlgorithm:
         for gen in range(self.generations):
             actual_gens = gen + 1
 
-            new_population: list[Individual] = list(
-                self.population[:self.elitism_rate]
-            )
 
             duplicates_replaced = 0
 
-            while len(new_population) < self.population_size:
+            # ── Tạo con cái ──────────────────────────────────────────────
+            children: list[Individual] = []
+            while len(children) < self.population_size:
                 p1, p2 = self.select_parents(self.population)
                 child = self.crossover(p1, p2)
                 child = self.mutate(child)
                 child = self._repair(child)
-                calculate_fitness(child, self.user_prefs)
+                child = self._greedy_refill(child)  # ★ Lấp đầy route
+                calculate_fitness(child, self.user_prefs, self.wait_penalty_weight)
+                children.append(child)
 
-                # ── Diversity Check ──────────────────────────────────────────
-                if self._is_duplicate(child, new_population):
-                    child = self._create_diverse_individual()
+            # ── Merged Replacement — giữ best từ (parents + children) ─────
+            merged = list(self.population) + children
+            merged.sort(key=lambda ind: ind.fitness, reverse=True)
+
+            # Lấy top individuals, đồng thời đảm bảo diversity
+            new_population: list[Individual] = []
+            for ind in merged:
+                if self.use_diversity_check and self._is_duplicate(ind, new_population):
                     duplicates_replaced += 1
+                    continue
+                new_population.append(ind)
+                if len(new_population) >= self.population_size:
+                    break
 
-                new_population.append(child)
+            # Nếu chưa đủ (do loại trùng), bổ sung random
+            while len(new_population) < self.population_size:
+                new_population.append(self._create_diverse_individual())
+                duplicates_replaced += 1
 
             new_population.sort(key=lambda ind: ind.fitness, reverse=True)
             self.population = new_population
@@ -493,13 +625,28 @@ class HybridGeneticAlgorithm:
                 gens_without_improvement += 1
 
             # ── Enhanced Logging ──────────────────────────────────────────────
-            best_fit = self.population[0].fitness
-            avg_fit = sum(ind.fitness for ind in self.population) / len(self.population)
+            all_fitnesses = sorted([ind.fitness for ind in self.population], reverse=True)
+            best_fit = all_fitnesses[0]
+            avg_fit = sum(all_fitnesses) / len(all_fitnesses)
+            median_fit = all_fitnesses[len(all_fitnesses) // 2]
+            worst_fit = all_fitnesses[-1]
 
             # Đếm số lộ trình duy nhất (unique routes)
             unique_routes = len({
                 frozenset(p.id for p in ind.route[1:-1])
                 for ind in self.population
+            })
+
+            # ── Convergence Log (cho vẽ đồ thị) ─────────────────────────────
+            self.convergence_log.append({
+                "gen": gen + 1,
+                "best_fitness": best_fit,
+                "avg_fitness": avg_fit,
+                "median_fitness": median_fit,
+                "worst_fitness": worst_fit,
+                "unique_routes": unique_routes,
+                "wait_time": self.population[0].total_wait,
+                "best_score": self.population[0].total_score,
             })
 
             print(
@@ -523,6 +670,10 @@ class HybridGeneticAlgorithm:
                 break
 
         elapsed = time.perf_counter() - start_time
+
+        # ── Store results ────────────────────────────────────────────────────
+        self.actual_gens = actual_gens
+        self.best_individual = best_ever
 
         print(f"\n[HGA] ═══ KẾT QUẢ CUỐI CÙNG ═══")
         print(f"      Generations run   = {actual_gens}/{self.generations}")
