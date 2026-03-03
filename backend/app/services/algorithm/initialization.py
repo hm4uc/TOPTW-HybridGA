@@ -2,10 +2,10 @@
 Population Initialization for the Hybrid Genetic Algorithm (HGA).
 
 Implements two strategies from Botelho et al. (2010) and Labadie et al. (2012):
-  • Strategy 1 – Randomized Insertion Heuristic  (80% of population, 40 individuals)
-  • Strategy 2 – Pure Random Initialization        (20% of population, 10 individuals)
+  • Strategy 1 – Randomized Insertion Heuristic  (80% of population, 80 individuals)
+  • Strategy 2 – Pure Random Initialization        (20% of population, 20 individuals)
 
-Total population size: 50 (fixed).
+Total population size: 100 (fixed).
 """
 
 import random
@@ -139,14 +139,14 @@ def initialize_population(
     use_heuristic_init: bool = True,
 ) -> List[Individual]:
     """
-    Generate the initial population of 50 individuals.
+    Generate the initial population of 100 individuals.
 
     Chế độ mặc định (use_heuristic_init=True):
-      • 40 via Randomized Insertion Heuristic  (high quality + diversity)
-      • 10 via Pure Random                     (exploration / diversity)
+      • 80 via Randomized Insertion Heuristic  (high quality + diversity)
+      • 20 via Pure Random                     (exploration / diversity)
 
     Chế độ ablation (use_heuristic_init=False):
-      • 50 via Pure Random  (để đánh giá đóng góp của heuristic init)
+      • 100 via Pure Random  (để đánh giá đóng góp của heuristic init)
 
     Every route is guaranteed to:
       ✓ Start and end at the Depot (POI id == 0)
@@ -165,7 +165,7 @@ def initialize_population(
     Returns
     -------
     list[Individual]
-        Population of size 50.
+        Population of size 100.
     """
     depot = next((p for p in pois if p.id == 0), None)
     if depot is None:

@@ -98,7 +98,6 @@ class HybridGeneticAlgorithm:
         self.generations = generations
         self.stagnation_limit = stagnation_limit
         self.improvement_threshold = 1e-4
-        self.elitism_rate = 5
         self.tournament_k = tournament_k
         self.population: list[Individual] = []
 
