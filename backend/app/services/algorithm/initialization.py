@@ -12,18 +12,12 @@ import random
 from typing import List
 
 from app.models.domain import POI, Individual
-from app.models.schemas import UserPreferences
+from app.models.requests import UserPreferences
+from app.core.config import POPULATION_SIZE, HEURISTIC_COUNT, RANDOM_COUNT, RCL_SIZE
 from app.services.algorithm.fitness import (
     get_travel_time,
     try_add_poi,
 )
-
-
-# ─── Constants ───────────────────────────────────────────────────────────────
-POPULATION_SIZE = 100
-HEURISTIC_COUNT = 80   # 80%  → Randomized Insertion Heuristic
-RANDOM_COUNT    = 20   # 20%  → Pure Random
-RCL_SIZE        = 3    # Top-k candidates in Restricted Candidate List
 
 
 # =============================================================================

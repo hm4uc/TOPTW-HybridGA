@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.services.data_loader import load_solomon_instance
 from app.services.algorithm.hga_engine import HybridGeneticAlgorithm
-from app.models.schemas import UserPreferences
+from app.models.requests import UserPreferences
 
 
 # ══════════════════════════════════════════════════════════════════════════════

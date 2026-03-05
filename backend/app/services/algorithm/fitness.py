@@ -1,7 +1,14 @@
 import math
 from typing import List, Optional
+
 from app.models.domain import POI
-from app.models.schemas import UserPreferences
+from app.models.requests import UserPreferences
+from app.core.config import (
+    PENALTY_LATE_ARRIVAL,
+    PENALTY_LATE_RETURN,
+    PENALTY_BUDGET,
+    PENALTY_WAIT,
+)
 
 
 # =============================================================================
@@ -149,28 +156,10 @@ def try_add_poi(route: list[POI], candidate: POI,
 # =============================================================================
 #  FITNESS EVALUATION
 # =============================================================================
-#
-#  Bảng hệ số phạt (Penalty Coefficients):
-#  ┌─────────────────────────┬────────────┬──────────────────────────────────┐
-#  │ Loại phạt               │  Hệ số     │  Mục đích                        │
-#  ├─────────────────────────┼────────────┼──────────────────────────────────┤
-#  │ Trễ giờ (> close_time)  │  100.0     │  Vi phạm ràng buộc CỨNG          │
-#  │ Về depot trễ            │  100.0     │  Vi phạm ràng buộc CỨNG          │
-#  │ Lố ngân sách            │    0.5     │  Ràng buộc mềm                   │
-#  │ Thời gian chờ           │    0.2     │  Chất lượng trải nghiệm du lịch  │
-#  └─────────────────────────┴────────────┴──────────────────────────────────┘
-#
-#  Chờ 15'  → phạt  3.0   (bình thường, ghé cafe)
-#  Chờ 30'  → phạt  6.0   (hơi khó chịu)
-#  Chờ 60'  → phạt 12.0   (tệ → GA cố tránh)
-#  Chờ 120' → phạt 24.0   (rất tệ → GA gần như chắc chắn tránh)
-#
+#  Hệ số phạt được định nghĩa tập trung tại: app/core/config.py
+#  PENALTY_LATE_ARRIVAL, PENALTY_LATE_RETURN, PENALTY_BUDGET, PENALTY_WAIT
+#  đã được import ở đầu file.
 # =============================================================================
-
-PENALTY_LATE_ARRIVAL  = 100.0   # Đến sau close_time  (ràng buộc cứng)
-PENALTY_LATE_RETURN   = 100.0   # Về depot trễ        (ràng buộc cứng)
-PENALTY_BUDGET        =   0.5   # Vượt ngân sách      (ràng buộc mềm)
-PENALTY_WAIT          =   0.2   # Thời gian chờ       (chất lượng trải nghiệm)
 
 
 def calculate_fitness(ind, user_prefs: UserPreferences,

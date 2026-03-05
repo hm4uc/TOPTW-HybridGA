@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from experiments.benchmark_runner import run_batch, INSTANCE_CONFIGS
-from app.models.schemas import UserPreferences
+from app.models.requests import UserPreferences
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Cấu hình

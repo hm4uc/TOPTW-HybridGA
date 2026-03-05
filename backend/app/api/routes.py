@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 import logging
-from app.models.schemas import OptimizationResponse, UserPreferences
+from app.models.requests import UserPreferences
+from app.models.responses import OptimizationResponse
 from app.services.algorithm.hga_engine import HybridGeneticAlgorithm
 from app.services.data_loader import load_solomon_c101
 
